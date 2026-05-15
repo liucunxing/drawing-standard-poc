@@ -6,10 +6,3 @@
 /dataSources.local.xml
 # Editor-based HTTP Client requests
 /httpRequests/
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.env
-venv/
