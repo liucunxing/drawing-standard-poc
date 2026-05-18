@@ -1,3 +1,5 @@
+# 安装命令：pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
 aiofiles==25.1.0
 aistudio-sdk==0.3.8
 albucore==0.0.13
