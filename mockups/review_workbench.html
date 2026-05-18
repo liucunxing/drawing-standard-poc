@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>图纸标准审查工作台</title>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --panel: #ffffff;
+      --line: #d9e0e8;
+      --text: #1f2937;
+      --muted: #667085;
+      --primary: #2563eb;
+      --primary-soft: #e8f0ff;
+      --green: #138a43;
+      --green-soft: #e8f7ee;
+      --orange: #c76a12;
+      --orange-soft: #fff3e3;
+      --red: #c93636;
+      --red-soft: #fff0f0;
+      --blue: #2266b8;
+      --blue-soft: #eaf3ff;
+      --purple: #7a4bc2;
+      --purple-soft: #f2ecff;
+      --shadow: 0 10px 30px rgba(16, 24, 40, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      font-size: 14px;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+    }
+
+    aside {
+      background: #172033;
+      color: #d9e3f5;
+      padding: 20px 16px;
+    }
+
+    .brand {
+      font-size: 18px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 24px;
+      line-height: 1.35;
+    }
+
+    .brand span {
+      display: block;
+      margin-top: 5px;
+      color: #9fb0ca;
+      font-size: 12px;
+      font-weight: 400;
+    }
+
+    .nav-item {
+      height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px;
+      border-radius: 6px;
+      color: #cad6ea;
+      margin-bottom: 6px;
+    }
+
+    .nav-item.active {
+      background: #263550;
+      color: #ffffff;
+    }
+
+    .nav-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.85;
+    }
+
+    main {
+      min-width: 0;
+      padding: 20px 24px 28px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      height: 36px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--text);
+      padding: 0 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    button.primary {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #ffffff;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.75fr);
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      min-height: 52px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .panel-title {
+      font-weight: 700;
+    }
+
+    .panel-body {
+      padding: 16px;
+    }
+
+    .upload-box {
+      border: 1px dashed #9db3d5;
+      background: #f8fbff;
+      border-radius: 8px;
+      padding: 20px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .upload-box strong {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 6px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #ffffff;
+    }
+
+    .stat .num {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .stat .label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 11px 10px;
+      text-align: left;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    th {
+      color: #475467;
+      background: #f8fafc;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    tr:hover td {
+      background: #fbfdff;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .tag.green {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .tag.orange {
+      background: var(--orange-soft);
+      color: var(--orange);
+    }
+
+    .tag.red {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .tag.blue {
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .tag.purple {
+      background: var(--purple-soft);
+      color: var(--purple);
+    }
+
+    .progress {
+      width: 120px;
+      height: 7px;
+      background: #e5eaf2;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .progress span {
+      display: block;
+      height: 100%;
+      background: var(--primary);
+    }
+
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+      padding: 0 12px;
+    }
+
+    .tab {
+      height: 44px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      border-radius: 0;
+      padding: 0 12px;
+      color: var(--muted);
+    }
+
+    .tab.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+      font-weight: 700;
+    }
+
+    .detail-layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 320px;
+      min-height: 460px;
+    }
+
+    .page-list,
+    .review-side {
+      border-right: 1px solid var(--line);
+      background: #fbfcfe;
+      padding: 14px;
+    }
+
+    .review-side {
+      border-right: 0;
+      border-left: 1px solid var(--line);
+    }
+
+    .page-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+
+    .page-thumb {
+      height: 142px;
+      border: 1px solid #c8d2e0;
+      background:
+        linear-gradient(90deg, transparent 49%, rgba(37, 99, 235, 0.12) 50%, transparent 51%),
+        linear-gradient(#ffffff, #eef3fa);
+      position: relative;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .bbox {
+      position: absolute;
+      border: 2px solid #2563eb;
+      background: rgba(37, 99, 235, 0.10);
+      border-radius: 3px;
+    }
+
+    .bbox.one {
+      left: 28px;
+      top: 28px;
+      width: 168px;
+      height: 42px;
+    }
+
+    .bbox.two {
+      left: 52px;
+      top: 88px;
+      width: 120px;
+      height: 32px;
+      border-color: #c76a12;
+      background: rgba(199, 106, 18, 0.10);
+    }
+
+    .page-meta {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .viewer {
+      padding: 16px;
+      min-width: 0;
+    }
+
+    .viewer-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .table-image {
+      height: 150px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(90deg, rgba(31, 41, 55, 0.10) 1px, transparent 1px),
+        linear-gradient(rgba(31, 41, 55, 0.10) 1px, transparent 1px),
+        #ffffff;
+      background-size: 80px 38px;
+      margin-bottom: 14px;
+    }
+
+    .code {
+      background: #101828;
+      color: #d1e0ff;
+      border-radius: 8px;
+      padding: 14px;
+      overflow-x: auto;
+      line-height: 1.65;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+    }
+
+    .review-form label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin: 12px 0 6px;
+    }
+
+    select,
+    textarea,
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 10px;
+      font: inherit;
+      background: #ffffff;
+    }
+
+    textarea {
+      min-height: 84px;
+      resize: vertical;
+    }
+
+    .hint {
+      padding: 10px 12px;
+      border: 1px solid #cbd8ee;
+      background: var(--primary-soft);
+      color: #24416f;
+      border-radius: 8px;
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+
+    @media (max-width: 1180px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      aside {
+        display: none;
+      }
+
+      .grid,
+      .detail-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .review-side,
+      .page-list {
+        border: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <div class="brand">
+        图纸标准审查
+        <span>Drawing Review POC</span>
+      </div>
+      <div class="nav-item active"><span class="nav-dot"></span>任务工作台</div>
+      <div class="nav-item"><span class="nav-dot"></span>上传图纸</div>
+      <div class="nav-item"><span class="nav-dot"></span>标准库管理</div>
+      <div class="nav-item"><span class="nav-dot"></span>样本验证集</div>
+      <div class="nav-item"><span class="nav-dot"></span>系统配置</div>
+    </aside>
+
+    <main>
+      <div class="topbar">
+        <div>
+          <h1>图纸标准审查工作台</h1>
+          <div class="subtitle">上传超高分辨率 PDF 图纸，跟踪识别进度，复核标准引用结果。</div>
+        </div>
+        <div class="actions">
+          <button>导出结果</button>
+          <button class="primary">上传 PDF</button>
+        </div>
+      </div>
+
+      <section class="grid">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">新建审查任务</div>
+            <span class="tag blue">PDF 固定格式</span>
+          </div>
+          <div class="panel-body">
+            <div class="upload-box">
+              <div>
+                <strong>拖入 PDF 图纸或选择文件夹</strong>
+                <div class="muted">生产图纸分辨率较高，系统将进入队列并展示处理进度。</div>
+              </div>
+              <button class="primary">选择文件</button>
+            </div>
+            <div class="stats">
+              <div class="stat"><div class="num">18</div><div class="label">今日任务</div></div>
+              <div class="stat"><div class="num">126</div><div class="label">识别表格</div></div>
+              <div class="stat"><div class="num">412</div><div class="label">提取标准</div></div>
+              <div class="stat"><div class="num">23</div><div class="label">异常项</div></div>
+              <div class="stat"><div class="num">9</div><div class="label">待复核</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">处理队列</div>
+            <span class="muted">10 并发建议</span>
+          </div>
+          <div class="panel-body">
+            <table>
+              <thead>
+                <tr><th>任务</th><th>状态</th><th>进度</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>压力容器图纸 A</td>
+                  <td><span class="tag blue">处理中</span></td>
+                  <td><div class="progress"><span style="width:72%"></span></div></td>
+                </tr>
+                <tr>
+                  <td>塔器图纸 B</td>
+                  <td><span class="tag purple">待复核</span></td>
+                  <td><div class="progress"><span style="width:100%"></span></div></td>
+                </tr>
+                <tr>
+                  <td>管道图纸 C</td>
+                  <td><span class="tag green">已完成</span></td>
+                  <td><div class="progress"><span style="width:100%"></span></div></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div class="panel-title">任务详情：压力容器图纸 A</div>
+          <div class="actions">
+            <button>重新处理</button>
+            <button>下载报告</button>
+          </div>
+        </div>
+        <div class="tabs">
+          <button class="tab active">审查结果</button>
+          <button class="tab">图纸识别</button>
+          <button class="tab">表格解析</button>
+          <button class="tab">标准提取</button>
+          <button class="tab">处理日志</button>
+        </div>
+
+        <div class="detail-layout">
+          <div class="page-list">
+            <div class="hint">页面预览叠加表格框，用于排查是否漏检或裁剪错位。</div>
+            <div class="page-card">
+              <div class="page-thumb">
+                <div class="bbox one"></div>
+                <div class="bbox two"></div>
+              </div>
+              <div class="page-meta"><span>第 1 页</span><span>2 个表格</span></div>
+            </div>
+            <div class="page-card">
+              <div class="page-thumb">
+                <div class="bbox one" style="top:68px;width:145px"></div>
+              </div>
+              <div class="page-meta"><span>第 2 页</span><span>1 个表格</span></div>
+            </div>
+          </div>
+
+          <div class="viewer">
+            <div class="viewer-head">
+              <div>
+                <strong>审查结果清单</strong>
+                <div class="muted">按异常优先排序，点击结果可定位到来源表格。</div>
+              </div>
+              <button>只看异常</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>页码</th>
+                    <th>表格</th>
+                    <th>识别标准号</th>
+                    <th>标准库匹配</th>
+                    <th>结果</th>
+                    <th>置信度</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>1</td>
+                    <td>T-001</td>
+                    <td>GB/T 150.1</td>
+                    <td>GB/T 150</td>
+                    <td><span class="tag green">完全符合</span></td>
+                    <td>0.96</td>
+                  </tr>
+                  <tr>
+                    <td>1</td>
+                    <td>T-001</td>
+                    <td>NB/T 47041-2014</td>
+                    <td>NB/T 47041-2022</td>
+                    <td><span class="tag orange">年份不一致</span></td>
+                    <td>0.94</td>
+                  </tr>
+                  <tr>
+                    <td>1</td>
+                    <td>T-002</td>
+                    <td>NB/T 47015-2011</td>
+                    <td>-</td>
+                    <td><span class="tag red">不存在</span></td>
+                    <td>0.88</td>
+                  </tr>
+                  <tr>
+                    <td>2</td>
+                    <td>T-003</td>
+                    <td>NB/T 47018.4-2022</td>
+                    <td>NB/T 47018.4-2022</td>
+                    <td><span class="tag green">完全符合</span></td>
+                    <td>0.98</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div style="height:16px"></div>
+            <strong>表格截图与解析预览</strong>
+            <div class="table-image" aria-label="表格截图占位"></div>
+            <div class="code">| 标准号 | 名称 |
+|---|---|
+| GB/T 150.1 | 压力容器 |
+| NB/T 47041-2014 | 塔式容器 |
+| NB/T 47015-2011 | 压力容器焊接规程 |</div>
+          </div>
+
+          <div class="review-side">
+            <div class="panel-title">人工复核</div>
+            <p class="muted">当前选中：NB/T 47041-2014。系统判断标准库现行版本为 2022。</p>
+            <div class="review-form">
+              <label>复核结论</label>
+              <select>
+                <option>确认年份不一致</option>
+                <option>改为完全符合</option>
+                <option>改为不存在</option>
+                <option>标记为误识别</option>
+                <option>继续待复核</option>
+              </select>
+              <label>备注</label>
+              <textarea>建议业务确认该图纸是否需要更新引用至 NB/T 47041-2022。</textarea>
+              <div style="height:12px"></div>
+              <button class="primary" style="width:100%">提交复核</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
