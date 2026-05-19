@@ -1,8 +1,6 @@
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Query, UploadFile
 from backend.app.core.response import Result
-from backend.app.models.schemas import UserCreate
 from backend.app.services.table_layout_service import table_layout_service
-from backend.app.services.user_service import user_service
 
 router = APIRouter()
 
@@ -31,13 +29,25 @@ router = APIRouter()
 
 
 @router.post("/drawing/extract-table-blocks", response_model=Result)
-async def extract_table_blocks_from_pdf(file: UploadFile = File(...)):
-    """第一步：上传PDF并提取所有表格区块。"""
+async def extract_table_blocks_from_pdf(
+    file: UploadFile = File(...),
+    score_threshold: float = Query(0.45, ge=0, le=1, description="表格候选框最小置信度"),
+    render_scale: float = Query(2.0, gt=0, le=6, description="PDF 页面渲染缩放倍数"),
+    crop_padding: int = Query(16, ge=0, le=512, description="模型框外扩像素"),
+    refine_padding: int = Query(8, ge=0, le=128, description="表格线精裁后保留边距"),
+    enable_line_fallback: bool = Query(False, description="是否启用整页线条兜底候选，默认关闭以避免过检"),
+):
+    """第一步：上传 PDF 并提取所有表格区块。"""
     try:
         pdf_bytes = await file.read()
         data = table_layout_service.extract_tables_from_uploaded_pdf(
             pdf_bytes=pdf_bytes,
             filename=file.filename or "upload.pdf",
+            score_threshold=score_threshold,
+            render_scale=render_scale,
+            crop_padding=crop_padding,
+            refine_padding=refine_padding,
+            enable_line_fallback=enable_line_fallback,
         )
         return Result.ok(data=data, msg="表格区块提取完成")
     except Exception as exc:
