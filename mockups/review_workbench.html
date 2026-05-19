@@ -3,27 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>图纸标准审查工作台</title>
+  <title>图纸表格识别 POC</title>
   <style>
     :root {
-      --bg: #f5f7fa;
+      --bg: #f4f6f9;
       --panel: #ffffff;
-      --line: #d9e0e8;
+      --line: #d8e0ea;
       --text: #1f2937;
       --muted: #667085;
-      --primary: #2563eb;
-      --primary-soft: #e8f0ff;
-      --green: #138a43;
-      --green-soft: #e8f7ee;
-      --orange: #c76a12;
-      --orange-soft: #fff3e3;
-      --red: #c93636;
-      --red-soft: #fff0f0;
-      --blue: #2266b8;
-      --blue-soft: #eaf3ff;
-      --purple: #7a4bc2;
-      --purple-soft: #f2ecff;
-      --shadow: 0 10px 30px rgba(16, 24, 40, 0.08);
+      --primary: #1f6feb;
+      --primary-soft: #eaf2ff;
+      --success: #15803d;
+      --success-soft: #eaf7ef;
+      --warning: #b45309;
+      --warning-soft: #fff5e6;
+      --danger: #b42318;
+      --danger-soft: #fff0ee;
+      --code: #111827;
+      --shadow: 0 12px 28px rgba(16, 24, 40, 0.08);
     }
 
     * {
@@ -38,98 +35,24 @@
       font-size: 14px;
     }
 
-    .app {
-      min-height: 100vh;
-      display: grid;
-      grid-template-columns: 248px minmax(0, 1fr);
-    }
-
-    aside {
-      background: #172033;
-      color: #d9e3f5;
-      padding: 20px 16px;
-    }
-
-    .brand {
-      font-size: 18px;
-      font-weight: 700;
-      color: #ffffff;
-      margin-bottom: 24px;
-      line-height: 1.35;
-    }
-
-    .brand span {
-      display: block;
-      margin-top: 5px;
-      color: #9fb0ca;
-      font-size: 12px;
-      font-weight: 400;
-    }
-
-    .nav-item {
-      height: 40px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 0 12px;
-      border-radius: 6px;
-      color: #cad6ea;
-      margin-bottom: 6px;
-    }
-
-    .nav-item.active {
-      background: #263550;
-      color: #ffffff;
-    }
-
-    .nav-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: currentColor;
-      opacity: 0.85;
-    }
-
-    main {
-      min-width: 0;
-      padding: 20px 24px 28px;
-    }
-
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 18px;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 22px;
-      letter-spacing: 0;
-    }
-
-    .subtitle {
-      margin-top: 5px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
+    button,
+    input {
+      font: inherit;
     }
 
     button {
       height: 36px;
       border: 1px solid var(--line);
+      border-radius: 6px;
       background: #ffffff;
       color: var(--text);
       padding: 0 14px;
-      border-radius: 6px;
       cursor: pointer;
-      font: inherit;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.58;
     }
 
     button.primary {
@@ -138,11 +61,96 @@
       color: #ffffff;
     }
 
+    input {
+      width: 100%;
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 10px;
+      background: #ffffff;
+      color: var(--text);
+    }
+
+    .app {
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .shell {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin-top: 6px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #ffffff;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    .status-pill.ready .status-dot {
+      background: var(--success);
+    }
+
+    .status-pill.loading .status-dot {
+      background: var(--primary);
+      animation: pulse 1s infinite ease-in-out;
+    }
+
+    .status-pill.error .status-dot {
+      background: var(--danger);
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(0.85);
+        opacity: 0.55;
+      }
+
+      50% {
+        transform: scale(1.2);
+        opacity: 1;
+      }
+    }
+
     .grid {
       display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.75fr);
+      grid-template-columns: minmax(340px, 0.74fr) minmax(0, 1.26fr);
       gap: 16px;
-      margin-bottom: 16px;
+      align-items: start;
     }
 
     .panel {
@@ -171,45 +179,82 @@
       padding: 16px;
     }
 
-    .upload-box {
-      border: 1px dashed #9db3d5;
-      background: #f8fbff;
+    .upload-zone {
+      min-height: 156px;
+      border: 1px dashed #98abc7;
       border-radius: 8px;
-      padding: 20px;
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 16px;
+      background: #f8fbff;
+      display: flex;
       align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 18px;
+      cursor: pointer;
+      transition: border-color 0.16s ease, background 0.16s ease;
     }
 
-    .upload-box strong {
+    .upload-zone:hover,
+    .upload-zone.dragging {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+    }
+
+    .upload-zone strong {
       display: block;
+      margin-bottom: 7px;
       font-size: 16px;
-      margin-bottom: 6px;
     }
 
     .muted {
       color: var(--muted);
     }
 
+    .form-row {
+      margin-top: 14px;
+    }
+
+    .form-row label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .file-meta {
+      margin-top: 14px;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      line-height: 1.6;
+    }
+
     .stats {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 10px;
-      margin-top: 14px;
+      margin-bottom: 16px;
     }
 
     .stat {
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 12px;
       background: #ffffff;
+      padding: 12px;
     }
 
     .stat .num {
-      font-size: 22px;
+      font-size: 23px;
       font-weight: 700;
-      margin-bottom: 4px;
+      line-height: 1;
+      margin-bottom: 6px;
     }
 
     .stat .label {
@@ -217,9 +262,97 @@
       font-size: 12px;
     }
 
+    .step-block {
+      margin-top: 18px;
+    }
+
+    .step-block:first-of-type {
+      margin-top: 0;
+    }
+
+    .step-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+      font-weight: 700;
+    }
+
+    .step-note {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 400;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .info-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 10px 12px;
+      min-width: 0;
+    }
+
+    .info-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .info-value {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+
+    .message {
+      display: none;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      line-height: 1.6;
+    }
+
+    .message.show {
+      display: block;
+    }
+
+    .message.info {
+      border: 1px solid #b8cbed;
+      background: var(--primary-soft);
+      color: #24416f;
+    }
+
+    .message.success {
+      border: 1px solid #b9dec5;
+      background: var(--success-soft);
+      color: var(--success);
+    }
+
+    .message.error {
+      border: 1px solid #fac5bf;
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
+      background: #ffffff;
     }
 
     th,
@@ -232,21 +365,40 @@
     }
 
     th {
-      color: #475467;
       background: #f8fafc;
+      color: #475467;
       font-size: 12px;
       font-weight: 700;
     }
 
-    tr:hover td {
-      background: #fbfdff;
+    tr:last-child td {
+      border-bottom: 0;
     }
 
-    .table-wrap {
-      overflow-x: auto;
+    .empty {
+      padding: 34px 12px;
+      text-align: center;
+      color: var(--muted);
     }
 
-    .tag {
+    .score {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: var(--success-soft);
+      color: var(--success);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .score.warn {
+      background: var(--warning-soft);
+      color: var(--warning);
+    }
+
+    .result-tag {
       display: inline-flex;
       align-items: center;
       height: 24px;
@@ -256,434 +408,676 @@
       font-weight: 700;
     }
 
-    .tag.green {
-      background: var(--green-soft);
-      color: var(--green);
+    .result-tag.pass {
+      background: var(--success-soft);
+      color: var(--success);
     }
 
-    .tag.orange {
-      background: var(--orange-soft);
-      color: var(--orange);
+    .result-tag.warn {
+      background: var(--warning-soft);
+      color: var(--warning);
     }
 
-    .tag.red {
-      background: var(--red-soft);
-      color: var(--red);
+    .result-tag.error {
+      background: var(--danger-soft);
+      color: var(--danger);
     }
 
-    .tag.blue {
-      background: var(--blue-soft);
-      color: var(--blue);
-    }
-
-    .tag.purple {
-      background: var(--purple-soft);
-      color: var(--purple);
-    }
-
-    .progress {
-      width: 120px;
-      height: 7px;
-      background: #e5eaf2;
-      border-radius: 999px;
+    .path {
+      max-width: 320px;
       overflow: hidden;
-    }
-
-    .progress span {
-      display: block;
-      height: 100%;
-      background: var(--primary);
-    }
-
-    .tabs {
-      display: flex;
-      border-bottom: 1px solid var(--line);
-      background: #ffffff;
-      padding: 0 12px;
-    }
-
-    .tab {
-      height: 44px;
-      border: 0;
-      border-bottom: 2px solid transparent;
-      background: transparent;
-      border-radius: 0;
-      padding: 0 12px;
+      text-overflow: ellipsis;
+      direction: rtl;
       color: var(--muted);
     }
 
-    .tab.active {
-      color: var(--primary);
-      border-bottom-color: var(--primary);
+    details {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    summary {
+      padding: 12px 14px;
+      cursor: pointer;
       font-weight: 700;
     }
 
-    .detail-layout {
-      display: grid;
-      grid-template-columns: 280px minmax(0, 1fr) 320px;
-      min-height: 460px;
-    }
-
-    .page-list,
-    .review-side {
-      border-right: 1px solid var(--line);
-      background: #fbfcfe;
+    pre {
+      margin: 0;
       padding: 14px;
-    }
-
-    .review-side {
-      border-right: 0;
-      border-left: 1px solid var(--line);
-    }
-
-    .page-card {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #ffffff;
-      padding: 10px;
-      margin-bottom: 10px;
-    }
-
-    .page-thumb {
-      height: 142px;
-      border: 1px solid #c8d2e0;
-      background:
-        linear-gradient(90deg, transparent 49%, rgba(37, 99, 235, 0.12) 50%, transparent 51%),
-        linear-gradient(#ffffff, #eef3fa);
-      position: relative;
-      border-radius: 4px;
-      overflow: hidden;
-    }
-
-    .bbox {
-      position: absolute;
-      border: 2px solid #2563eb;
-      background: rgba(37, 99, 235, 0.10);
-      border-radius: 3px;
-    }
-
-    .bbox.one {
-      left: 28px;
-      top: 28px;
-      width: 168px;
-      height: 42px;
-    }
-
-    .bbox.two {
-      left: 52px;
-      top: 88px;
-      width: 120px;
-      height: 32px;
-      border-color: #c76a12;
-      background: rgba(199, 106, 18, 0.10);
-    }
-
-    .page-meta {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .viewer {
-      padding: 16px;
-      min-width: 0;
-    }
-
-    .viewer-head {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-
-    .table-image {
-      height: 150px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background:
-        linear-gradient(90deg, rgba(31, 41, 55, 0.10) 1px, transparent 1px),
-        linear-gradient(rgba(31, 41, 55, 0.10) 1px, transparent 1px),
-        #ffffff;
-      background-size: 80px 38px;
-      margin-bottom: 14px;
-    }
-
-    .code {
-      background: #101828;
+      border-top: 1px solid var(--line);
+      background: var(--code);
       color: #d1e0ff;
-      border-radius: 8px;
-      padding: 14px;
-      overflow-x: auto;
-      line-height: 1.65;
+      overflow: auto;
+      max-height: 360px;
+      line-height: 1.58;
       font-family: Consolas, "Courier New", monospace;
       font-size: 12px;
     }
 
-    .review-form label {
-      display: block;
-      font-size: 12px;
-      color: var(--muted);
-      margin: 12px 0 6px;
+    .preview-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
     }
 
-    select,
-    textarea,
-    input {
-      width: 100%;
+    .preview-item {
       border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 9px 10px;
-      font: inherit;
-      background: #ffffff;
-    }
-
-    textarea {
-      min-height: 84px;
-      resize: vertical;
-    }
-
-    .hint {
-      padding: 10px 12px;
-      border: 1px solid #cbd8ee;
-      background: var(--primary-soft);
-      color: #24416f;
       border-radius: 8px;
-      line-height: 1.6;
-      margin-bottom: 12px;
+      background: #ffffff;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 78px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
     }
 
-    @media (max-width: 1180px) {
+    .thumb {
+      width: 78px;
+      height: 58px;
+      border: 1px solid #ccd6e4;
+      border-radius: 6px;
+      background:
+        linear-gradient(90deg, rgba(31, 41, 55, 0.12) 1px, transparent 1px),
+        linear-gradient(rgba(31, 41, 55, 0.12) 1px, transparent 1px),
+        #ffffff;
+      background-size: 19px 15px;
+      position: relative;
+    }
+
+    .thumb::after {
+      content: "";
+      position: absolute;
+      left: 16px;
+      top: 15px;
+      width: 43px;
+      height: 22px;
+      border: 2px solid var(--primary);
+      background: rgba(31, 111, 235, 0.12);
+      border-radius: 3px;
+    }
+
+    @media (max-width: 920px) {
       .app {
+        padding: 16px;
+      }
+
+      .topbar,
+      .grid {
         grid-template-columns: 1fr;
       }
 
-      aside {
-        display: none;
-      }
-
-      .grid,
-      .detail-layout {
-        grid-template-columns: 1fr;
-      }
-
-      .review-side,
-      .page-list {
-        border: 0;
-        border-bottom: 1px solid var(--line);
+      .topbar {
+        display: grid;
       }
 
       .stats {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: 1fr;
+      }
+
+      .info-grid {
+        grid-template-columns: 1fr;
       }
     }
   </style>
 </head>
 <body>
   <div class="app">
-    <aside>
-      <div class="brand">
-        图纸标准审查
-        <span>Drawing Review POC</span>
-      </div>
-      <div class="nav-item active"><span class="nav-dot"></span>任务工作台</div>
-      <div class="nav-item"><span class="nav-dot"></span>上传图纸</div>
-      <div class="nav-item"><span class="nav-dot"></span>标准库管理</div>
-      <div class="nav-item"><span class="nav-dot"></span>样本验证集</div>
-      <div class="nav-item"><span class="nav-dot"></span>系统配置</div>
-    </aside>
-
-    <main>
-      <div class="topbar">
+    <div class="shell">
+      <header class="topbar">
         <div>
-          <h1>图纸标准审查工作台</h1>
-          <div class="subtitle">上传超高分辨率 PDF 图纸，跟踪识别进度，复核标准引用结果。</div>
+          <h1>图纸表格识别 POC</h1>
+          <div class="subtitle">上传 PDF 图纸，按图纸识别、表格解析、标准提取比对三个步骤展示任务结果。</div>
         </div>
-        <div class="actions">
-          <button>导出结果</button>
-          <button class="primary">上传 PDF</button>
+        <div class="status-pill ready" id="statusPill">
+          <span class="status-dot"></span>
+          <span id="statusText">待上传</span>
         </div>
-      </div>
+      </header>
 
-      <section class="grid">
-        <div class="panel">
+      <main class="grid">
+        <section class="panel">
           <div class="panel-header">
-            <div class="panel-title">新建审查任务</div>
-            <span class="tag blue">PDF 固定格式</span>
+            <div class="panel-title">1. 上传 PDF</div>
           </div>
           <div class="panel-body">
-            <div class="upload-box">
+            <div class="upload-zone" id="uploadZone" tabindex="0" role="button" aria-label="选择 PDF 文件">
               <div>
-                <strong>拖入 PDF 图纸或选择文件夹</strong>
-                <div class="muted">生产图纸分辨率较高，系统将进入队列并展示处理进度。</div>
+                <strong>点击选择或拖入 PDF</strong>
+                <div class="muted">选择 PDF 后调用接口；演示数据按多 PDF 任务展示。</div>
               </div>
-              <button class="primary">选择文件</button>
             </div>
-            <div class="stats">
-              <div class="stat"><div class="num">18</div><div class="label">今日任务</div></div>
-              <div class="stat"><div class="num">126</div><div class="label">识别表格</div></div>
-              <div class="stat"><div class="num">412</div><div class="label">提取标准</div></div>
-              <div class="stat"><div class="num">23</div><div class="label">异常项</div></div>
-              <div class="stat"><div class="num">9</div><div class="label">待复核</div></div>
+            <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden>
+
+            <div class="form-row">
+              <label for="apiInput">后端接口地址</label>
+              <input id="apiInput" value="http://localhost:8000/api/drawing/extract-table-blocks">
+            </div>
+
+            <div class="actions">
+              <button class="primary" id="uploadBtn" disabled>开始识别</button>
+              <button id="demoBtn">加载演示数据</button>
+              <button id="clearBtn" disabled>清空结果</button>
+            </div>
+
+            <div class="file-meta" id="fileMeta">
+              <span class="muted">尚未选择文件</span>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div class="panel">
+        <section class="panel">
           <div class="panel-header">
-            <div class="panel-title">处理队列</div>
-            <span class="muted">10 并发建议</span>
+            <div class="panel-title">2. 分步骤任务结果明细</div>
           </div>
           <div class="panel-body">
-            <table>
-              <thead>
-                <tr><th>任务</th><th>状态</th><th>进度</th></tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>压力容器图纸 A</td>
-                  <td><span class="tag blue">处理中</span></td>
-                  <td><div class="progress"><span style="width:72%"></span></div></td>
-                </tr>
-                <tr>
-                  <td>塔器图纸 B</td>
-                  <td><span class="tag purple">待复核</span></td>
-                  <td><div class="progress"><span style="width:100%"></span></div></td>
-                </tr>
-                <tr>
-                  <td>管道图纸 C</td>
-                  <td><span class="tag green">已完成</span></td>
-                  <td><div class="progress"><span style="width:100%"></span></div></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+            <div class="message info show" id="message">选择 PDF 后点击“开始识别”。如果后端未启动，请先运行 FastAPI 服务。</div>
 
-      <section class="panel">
-        <div class="panel-header">
-          <div class="panel-title">任务详情：压力容器图纸 A</div>
-          <div class="actions">
-            <button>重新处理</button>
-            <button>下载报告</button>
-          </div>
-        </div>
-        <div class="tabs">
-          <button class="tab active">审查结果</button>
-          <button class="tab">图纸识别</button>
-          <button class="tab">表格解析</button>
-          <button class="tab">标准提取</button>
-          <button class="tab">处理日志</button>
-        </div>
-
-        <div class="detail-layout">
-          <div class="page-list">
-            <div class="hint">页面预览叠加表格框，用于排查是否漏检或裁剪错位。</div>
-            <div class="page-card">
-              <div class="page-thumb">
-                <div class="bbox one"></div>
-                <div class="bbox two"></div>
+            <section class="step-block">
+              <div class="step-title">
+                <span>图纸识别结果</span>
+                <span class="step-note">任务维度</span>
               </div>
-              <div class="page-meta"><span>第 1 页</span><span>2 个表格</span></div>
-            </div>
-            <div class="page-card">
-              <div class="page-thumb">
-                <div class="bbox one" style="top:68px;width:145px"></div>
+              <div class="stats">
+                <div class="stat">
+                  <div class="num" id="taskId">-</div>
+                  <div class="label">任务 ID</div>
+                </div>
+                <div class="stat">
+                  <div class="num" id="pdfCount">0</div>
+                  <div class="label">当前任务 PDF 个数</div>
+                </div>
+                <div class="stat">
+                  <div class="num" id="tableCount">0</div>
+                  <div class="label">识别表格</div>
+                </div>
               </div>
-              <div class="page-meta"><span>第 2 页</span><span>1 个表格</span></div>
-            </div>
-          </div>
+              <div class="info-grid" id="drawingInfo"></div>
+            </section>
 
-          <div class="viewer">
-            <div class="viewer-head">
-              <div>
-                <strong>审查结果清单</strong>
-                <div class="muted">按异常优先排序，点击结果可定位到来源表格。</div>
+            <section class="step-block">
+              <div class="step-title">
+                <span>表格解析结果</span>
+                <span class="step-note">裁剪区块明细</span>
               </div>
-              <button>只看异常</button>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>页码</th>
-                    <th>表格</th>
-                    <th>识别标准号</th>
-                    <th>标准库匹配</th>
-                    <th>结果</th>
-                    <th>置信度</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>1</td>
-                    <td>T-001</td>
-                    <td>GB/T 150.1</td>
-                    <td>GB/T 150</td>
-                    <td><span class="tag green">完全符合</span></td>
-                    <td>0.96</td>
-                  </tr>
-                  <tr>
-                    <td>1</td>
-                    <td>T-001</td>
-                    <td>NB/T 47041-2014</td>
-                    <td>NB/T 47041-2022</td>
-                    <td><span class="tag orange">年份不一致</span></td>
-                    <td>0.94</td>
-                  </tr>
-                  <tr>
-                    <td>1</td>
-                    <td>T-002</td>
-                    <td>NB/T 47015-2011</td>
-                    <td>-</td>
-                    <td><span class="tag red">不存在</span></td>
-                    <td>0.88</td>
-                  </tr>
-                  <tr>
-                    <td>2</td>
-                    <td>T-003</td>
-                    <td>NB/T 47018.4-2022</td>
-                    <td>NB/T 47018.4-2022</td>
-                    <td><span class="tag green">完全符合</span></td>
-                    <td>0.98</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>序号</th>
+                      <th>来源 PDF</th>
+                      <th>表格类型</th>
+                      <th>置信度</th>
+                      <th>坐标 bbox</th>
+                      <th>裁剪文件</th>
+                    </tr>
+                  </thead>
+                  <tbody id="resultBody">
+                    <tr>
+                      <td colspan="6"><div class="empty">暂无识别结果</div></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
 
-            <div style="height:16px"></div>
-            <strong>表格截图与解析预览</strong>
-            <div class="table-image" aria-label="表格截图占位"></div>
-            <div class="code">| 标准号 | 名称 |
-|---|---|
-| GB/T 150.1 | 压力容器 |
-| NB/T 47041-2014 | 塔式容器 |
-| NB/T 47015-2011 | 压力容器焊接规程 |</div>
-          </div>
+            <div class="preview-list" id="previewList"></div>
 
-          <div class="review-side">
-            <div class="panel-title">人工复核</div>
-            <p class="muted">当前选中：NB/T 47041-2014。系统判断标准库现行版本为 2022。</p>
-            <div class="review-form">
-              <label>复核结论</label>
-              <select>
-                <option>确认年份不一致</option>
-                <option>改为完全符合</option>
-                <option>改为不存在</option>
-                <option>标记为误识别</option>
-                <option>继续待复核</option>
-              </select>
-              <label>备注</label>
-              <textarea>建议业务确认该图纸是否需要更新引用至 NB/T 47041-2022。</textarea>
-              <div style="height:12px"></div>
-              <button class="primary" style="width:100%">提交复核</button>
-            </div>
+            <section class="step-block">
+              <div class="step-title">
+                <span>标准提取比对结果</span>
+                <span class="step-note">按 PDF 汇总，保留来源表格</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>PDF</th>
+                      <th>识别标准号</th>
+                      <th>标准库匹配</th>
+                      <th>结论</th>
+                      <th>来源表格</th>
+                      <th>建议</th>
+                    </tr>
+                  </thead>
+                  <tbody id="standardBody">
+                    <tr>
+                      <td colspan="6"><div class="empty">暂无标准比对结果</div></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <details>
+              <summary>原始 JSON</summary>
+              <pre id="rawJson">{}</pre>
+            </details>
           </div>
-        </div>
-      </section>
-    </main>
+        </section>
+      </main>
+    </div>
   </div>
+
+  <script>
+    const state = {
+      file: null,
+      result: null,
+      loading: false
+    };
+
+    const fileInput = document.getElementById("fileInput");
+    const uploadZone = document.getElementById("uploadZone");
+    const uploadBtn = document.getElementById("uploadBtn");
+    const demoBtn = document.getElementById("demoBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const fileMeta = document.getElementById("fileMeta");
+    const apiInput = document.getElementById("apiInput");
+    const message = document.getElementById("message");
+    const statusPill = document.getElementById("statusPill");
+    const statusText = document.getElementById("statusText");
+    const taskId = document.getElementById("taskId");
+    const pdfCount = document.getElementById("pdfCount");
+    const tableCount = document.getElementById("tableCount");
+    const drawingInfo = document.getElementById("drawingInfo");
+    const resultBody = document.getElementById("resultBody");
+    const standardBody = document.getElementById("standardBody");
+    const previewList = document.getElementById("previewList");
+    const rawJson = document.getElementById("rawJson");
+
+    const demoPayload = {
+      code: 200,
+      msg: "演示数据已加载：完成图纸表格区块识别",
+      data: {
+        task_id: "demo_njpc_001",
+        filename: "25.918-1 A1_压力容器装配图.pdf",
+        total_pdfs: 3,
+        total_pages: 3,
+        total_tables: 8,
+        pdf_path: "tmp/uploads/25.918-1_A1_demo.pdf",
+        drawing_info: {
+          project_name: "南京石化炼油装置改造项目",
+          unit_name: "加氢裂化联合装置",
+          equipment_name: "E-450401 换热器",
+          drawing_no: "25.918-1 A1",
+          discipline: "设备专业",
+          design_stage: "施工图",
+          scale: "1:20",
+          drawing_date: "2026-05-18",
+          designer: "王工",
+          checker: "李工"
+        },
+        tables: [
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            page: 1,
+            table_index: 1,
+            label: "标题栏 / 签审栏",
+            score: 0.982,
+            bbox: [3182, 2136, 4558, 3208],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_001_table_001.png"
+          },
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            page: 1,
+            table_index: 2,
+            label: "技术要求表",
+            score: 0.946,
+            bbox: [186, 142, 1848, 826],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_001_table_002.png"
+          },
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            page: 1,
+            table_index: 3,
+            label: "材料明细表",
+            score: 0.927,
+            bbox: [2564, 138, 4548, 1042],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_001_table_003.png"
+          },
+          {
+            pdf_name: "14.751-1-A1(E-450401)_管口方位图.pdf",
+            page: 1,
+            table_index: 1,
+            label: "管口表",
+            score: 0.914,
+            bbox: [226, 1684, 1588, 2568],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_002_table_001.png"
+          },
+          {
+            pdf_name: "14.751-1-A1(E-450401)_管口方位图.pdf",
+            page: 1,
+            table_index: 2,
+            label: "焊接参数表",
+            score: 0.871,
+            bbox: [1828, 1548, 3288, 2366],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_002_table_002.png"
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            page: 1,
+            table_index: 1,
+            label: "制造检验要求",
+            score: 0.889,
+            bbox: [148, 116, 1876, 742],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_003_table_001.png"
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            page: 1,
+            table_index: 2,
+            label: "标准引用清单",
+            score: 0.834,
+            bbox: [2214, 402, 4528, 1288],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_003_table_002.png"
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            page: 1,
+            table_index: 1,
+            label: "局部详图说明",
+            score: 0.763,
+            bbox: [496, 1776, 2196, 2504],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_004_table_001.png"
+          }
+        ],
+        standards: [
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            standard_no: "GB/T 150.1-2011",
+            matched_standard: "GB/T 150.1-2011",
+            status: "完全符合",
+            result_type: "pass",
+            source_table: "技术要求表 #2",
+            confidence: 0.96,
+            suggestion: "无需处理"
+          },
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            standard_no: "NB/T 47041-2014",
+            matched_standard: "NB/T 47041-2022",
+            status: "年份不一致",
+            result_type: "warn",
+            source_table: "材料明细表 #3",
+            confidence: 0.93,
+            suggestion: "建议确认是否更新至现行版本"
+          },
+          {
+            pdf_name: "14.751-1-A1(E-450401)_管口方位图.pdf",
+            standard_no: "HG/T 20592-2009",
+            matched_standard: "HG/T 20592-2009",
+            status: "完全符合",
+            result_type: "pass",
+            source_table: "管口表 #4",
+            confidence: 0.91,
+            suggestion: "无需处理"
+          },
+          {
+            pdf_name: "14.751-1-A1(E-450401)_管口方位图.pdf",
+            standard_no: "NB/T 47015-2011",
+            matched_standard: "NB/T 47015-2023",
+            status: "存在更新版本",
+            result_type: "warn",
+            source_table: "焊接参数表 #5",
+            confidence: 0.88,
+            suggestion: "建议由设备专业复核版本适用性"
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            standard_no: "JB/T 4730-2005",
+            matched_standard: "-",
+            status: "标准库未命中",
+            result_type: "error",
+            source_table: "制造检验要求 #6",
+            confidence: 0.82,
+            suggestion: "补充标准库或确认识别文本"
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            standard_no: "NB/T 47018.4-2022",
+            matched_standard: "NB/T 47018.4-2022",
+            status: "完全符合",
+            result_type: "pass",
+            source_table: "标准引用清单 #7",
+            confidence: 0.94,
+            suggestion: "无需处理"
+          }
+        ]
+      }
+    };
+
+    function formatSize(bytes) {
+      if (!bytes) return "0 KB";
+      const units = ["B", "KB", "MB", "GB"];
+      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+    }
+
+    function setMessage(type, text) {
+      message.className = `message ${type} show`;
+      message.textContent = text;
+    }
+
+    function setStatus(type, text) {
+      statusPill.className = `status-pill ${type}`;
+      statusText.textContent = text;
+    }
+
+    function setFile(file) {
+      if (!file) return;
+      state.file = file;
+      uploadBtn.disabled = false;
+      clearBtn.disabled = false;
+      fileMeta.innerHTML = `
+        <strong>${file.name}</strong><br>
+        <span class="muted">${formatSize(file.size)} · ${file.type || "PDF"}</span>
+      `;
+      setMessage("info", "文件已选择，可以开始识别。");
+      setStatus("ready", "已选择文件");
+    }
+
+    function resetResult() {
+      state.result = null;
+      taskId.textContent = "-";
+      pdfCount.textContent = "0";
+      tableCount.textContent = "0";
+      drawingInfo.innerHTML = "";
+      resultBody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无识别结果</div></td></tr>';
+      standardBody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无标准比对结果</div></td></tr>';
+      previewList.innerHTML = "";
+      rawJson.textContent = "{}";
+    }
+
+    function clearAll() {
+      state.file = null;
+      fileInput.value = "";
+      uploadBtn.disabled = true;
+      clearBtn.disabled = true;
+      fileMeta.innerHTML = '<span class="muted">尚未选择文件</span>';
+      resetResult();
+      setMessage("info", "选择 PDF 后点击“开始识别”。如果后端未启动，请先运行 FastAPI 服务。");
+      setStatus("ready", "待上传");
+    }
+
+    function loadDemoData() {
+      state.file = null;
+      state.result = demoPayload;
+      fileInput.value = "";
+      uploadBtn.disabled = true;
+      clearBtn.disabled = false;
+      fileMeta.innerHTML = `
+        <strong>${demoPayload.data.filename}</strong><br>
+        <span class="muted">演示样例 · 3 个单页 PDF · 已识别 8 个表格区块</span>
+      `;
+      renderResult(demoPayload);
+      setStatus("ready", "演示数据");
+      setMessage("success", demoPayload.msg);
+    }
+
+    function renderDrawingInfo(info) {
+      const items = [
+        ["项目名称", info.project_name],
+        ["装置名称", info.unit_name],
+        ["设备名称", info.equipment_name],
+        ["图号", info.drawing_no],
+        ["专业", info.discipline],
+        ["设计阶段", info.design_stage],
+        ["比例", info.scale],
+        ["出图日期", info.drawing_date],
+        ["设计 / 校核", [info.designer, info.checker].filter(Boolean).join(" / ")]
+      ];
+
+      drawingInfo.innerHTML = items.map(([label, value]) => `
+        <div class="info-item">
+          <div class="info-label">${label}</div>
+          <div class="info-value" title="${value || "-"}">${value || "-"}</div>
+        </div>
+      `).join("");
+    }
+
+    function standardTagClass(type) {
+      if (type === "pass") return "result-tag pass";
+      if (type === "error") return "result-tag error";
+      return "result-tag warn";
+    }
+
+    function renderResult(payload) {
+      const data = payload.data || {};
+      const tables = Array.isArray(data.tables) ? data.tables : [];
+      const standards = Array.isArray(data.standards) ? data.standards : [];
+      const sourcePdfName = data.filename || (state.file && state.file.name) || (data.pdf_path ? data.pdf_path.split(/[\\/]/).pop() : "");
+      const inferredPdfCount = data.total_pdfs || new Set(tables.map((item) => item.pdf_name || sourcePdfName).filter(Boolean)).size || (sourcePdfName ? 1 : 0);
+
+      taskId.textContent = data.task_id || "-";
+      pdfCount.textContent = inferredPdfCount;
+      tableCount.textContent = data.total_tables || tables.length;
+      renderDrawingInfo(data.drawing_info || {});
+      rawJson.textContent = JSON.stringify(payload, null, 2);
+
+      if (!tables.length) {
+        resultBody.innerHTML = '<tr><td colspan="6"><div class="empty">接口返回成功，但没有识别到表格区块</div></td></tr>';
+        previewList.innerHTML = "";
+      } else {
+        resultBody.innerHTML = tables.map((item, index) => {
+          const score = Number(item.score || 0);
+          const scoreClass = score >= 0.8 ? "score" : "score warn";
+          const globalIndex = index + 1;
+          return `
+            <tr>
+              <td>${globalIndex}</td>
+              <td>${item.pdf_name || sourcePdfName || "-"}</td>
+              <td>${item.label || "table"}</td>
+              <td><span class="${scoreClass}">${score.toFixed(3)}</span></td>
+              <td>${Array.isArray(item.bbox) ? item.bbox.join(", ") : "-"}</td>
+              <td><div class="path" title="${item.image_path || ""}">${item.image_path || "-"}</div></td>
+            </tr>
+          `;
+        }).join("");
+
+        previewList.innerHTML = tables.slice(0, 4).map((item, index) => `
+          <div class="preview-item">
+            <div class="thumb" aria-hidden="true"></div>
+            <div>
+              <strong>表格 ${index + 1} / ${item.label || "table"}</strong>
+              <div class="muted">${item.pdf_name || sourcePdfName || "-"} · bbox：${Array.isArray(item.bbox) ? item.bbox.join(", ") : "-"}</div>
+            </div>
+          </div>
+        `).join("");
+      }
+
+      if (!standards.length) {
+        standardBody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无标准比对结果</div></td></tr>';
+      } else {
+        standardBody.innerHTML = standards.map((item) => `
+          <tr>
+            <td>${item.pdf_name || "-"}</td>
+            <td>${item.standard_no || "-"}</td>
+            <td>${item.matched_standard || "-"}</td>
+            <td><span class="${standardTagClass(item.result_type)}">${item.status || "-"}</span></td>
+            <td>${item.source_table || "-"}</td>
+            <td>${item.suggestion || "-"}</td>
+          </tr>
+        `).join("");
+      }
+    }
+
+    async function uploadFile() {
+      if (!state.file || state.loading) return;
+
+      state.loading = true;
+      uploadBtn.disabled = true;
+      setStatus("loading", "识别中");
+      setMessage("info", "正在上传并识别，超高分辨率 PDF 可能需要等待一会儿。");
+
+      try {
+        const formData = new FormData();
+        formData.append("file", state.file);
+
+        const response = await fetch(apiInput.value.trim(), {
+          method: "POST",
+          body: formData
+        });
+
+        const payload = await response.json();
+        state.result = payload;
+
+        if (!response.ok || payload.code !== 200) {
+          throw new Error(payload.msg || `接口请求失败：${response.status}`);
+        }
+
+        renderResult(payload);
+        setStatus("ready", "识别完成");
+        setMessage("success", payload.msg || "表格区块提取完成。");
+      } catch (error) {
+        resetResult();
+        setStatus("error", "识别失败");
+        setMessage("error", error.message || "接口请求失败，请检查后端服务和接口地址。");
+      } finally {
+        state.loading = false;
+        uploadBtn.disabled = !state.file;
+      }
+    }
+
+    uploadZone.addEventListener("click", () => fileInput.click());
+    uploadZone.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    fileInput.addEventListener("change", (event) => {
+      const [file] = event.target.files;
+      setFile(file);
+    });
+
+    uploadZone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      uploadZone.classList.add("dragging");
+    });
+
+    uploadZone.addEventListener("dragleave", () => {
+      uploadZone.classList.remove("dragging");
+    });
+
+    uploadZone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      uploadZone.classList.remove("dragging");
+      const [file] = event.dataTransfer.files;
+      if (!file || !file.name.toLowerCase().endsWith(".pdf")) {
+        setMessage("error", "请选择 PDF 文件。");
+        return;
+      }
+      setFile(file);
+    });
+
+    uploadBtn.addEventListener("click", uploadFile);
+    demoBtn.addEventListener("click", loadDemoData);
+    clearBtn.addEventListener("click", clearAll);
+    loadDemoData();
+  </script>
 </body>
 </html>
