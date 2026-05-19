@@ -148,7 +148,13 @@
 
     .grid {
       display: grid;
-      grid-template-columns: minmax(340px, 0.74fr) minmax(0, 1.26fr);
+      grid-template-columns: minmax(390px, 0.92fr) minmax(0, 1.38fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .side-stack {
+      display: grid;
       gap: 16px;
       align-items: start;
     }
@@ -259,6 +265,73 @@
 
     .stat .label {
       color: var(--muted);
+      font-size: 12px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .summary-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 11px 12px;
+      min-width: 0;
+    }
+
+    .summary-card strong {
+      display: block;
+      font-size: 22px;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .summary-card span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .summary-card.pass strong {
+      color: var(--success);
+    }
+
+    .summary-card.warn strong {
+      color: var(--warning);
+    }
+
+    .summary-card.error strong {
+      color: var(--danger);
+    }
+
+    .summary-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .summary-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 10px 12px;
+    }
+
+    .summary-row strong {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary-row .muted {
+      margin-top: 3px;
       font-size: 12px;
     }
 
@@ -539,39 +612,84 @@
       </header>
 
       <main class="grid">
-        <section class="panel">
-          <div class="panel-header">
-            <div class="panel-title">1. 上传 PDF</div>
-          </div>
-          <div class="panel-body">
-            <div class="upload-zone" id="uploadZone" tabindex="0" role="button" aria-label="选择 PDF 文件">
-              <div>
-                <strong>点击选择或拖入 PDF</strong>
-                <div class="muted">选择 PDF 后调用接口；演示数据按多 PDF 任务展示。</div>
+        <div class="side-stack">
+          <section class="panel">
+            <div class="panel-header">
+              <div class="panel-title">1. 上传 PDF</div>
+            </div>
+            <div class="panel-body">
+              <div class="upload-zone" id="uploadZone" tabindex="0" role="button" aria-label="选择 PDF 文件">
+                <div>
+                  <strong>点击选择或拖入 PDF</strong>
+                  <div class="muted">选择 PDF 后调用接口；演示数据按多 PDF 任务展示。</div>
+                </div>
+              </div>
+              <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden>
+
+              <div class="form-row">
+                <label for="apiInput">后端接口地址</label>
+                <input id="apiInput" value="http://localhost:8000/api/drawing/extract-table-blocks">
+              </div>
+
+              <div class="actions">
+                <button class="primary" id="uploadBtn" disabled>开始识别</button>
+                <button id="demoBtn">加载演示数据</button>
+                <button id="clearBtn" disabled>清空结果</button>
+              </div>
+
+              <div class="file-meta" id="fileMeta">
+                <span class="muted">尚未选择文件</span>
               </div>
             </div>
-            <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden>
+          </section>
 
-            <div class="form-row">
-              <label for="apiInput">后端接口地址</label>
-              <input id="apiInput" value="http://localhost:8000/api/drawing/extract-table-blocks">
+          <section class="panel">
+            <div class="panel-header">
+              <div class="panel-title">2. 审查结果清单</div>
             </div>
-
-            <div class="actions">
-              <button class="primary" id="uploadBtn" disabled>开始识别</button>
-              <button id="demoBtn">加载演示数据</button>
-              <button id="clearBtn" disabled>清空结果</button>
+            <div class="panel-body">
+              <div class="summary-grid">
+                <div class="summary-card">
+                  <strong id="uploadedCount">0</strong>
+                  <span>PDF 上传个数</span>
+                </div>
+                <div class="summary-card pass">
+                  <strong id="processedCount">0</strong>
+                  <span>已处理个数</span>
+                </div>
+                <div class="summary-card warn">
+                  <strong id="processingCount">0</strong>
+                  <span>处理中个数</span>
+                </div>
+                <div class="summary-card">
+                  <strong id="standardCount">0</strong>
+                  <span>已识别标准条数</span>
+                </div>
+                <div class="summary-card pass">
+                  <strong id="passCount">0</strong>
+                  <span>完全符合条数</span>
+                </div>
+                <div class="summary-card warn">
+                  <strong id="mismatchCount">0</strong>
+                  <span>不一致个数</span>
+                </div>
+                <div class="summary-card error">
+                  <strong id="missingCount">0</strong>
+                  <span>未命中个数</span>
+                </div>
+                <div class="summary-card warn">
+                  <strong id="reviewCount">0</strong>
+                  <span>待复核个数</span>
+                </div>
+              </div>
+              <div class="summary-list" id="summaryList"></div>
             </div>
-
-            <div class="file-meta" id="fileMeta">
-              <span class="muted">尚未选择文件</span>
-            </div>
-          </div>
-        </section>
+          </section>
+        </div>
 
         <section class="panel">
           <div class="panel-header">
-            <div class="panel-title">2. 分步骤任务结果明细</div>
+            <div class="panel-title">3. 分步骤任务结果明细</div>
           </div>
           <div class="panel-body">
             <div class="message info show" id="message">选择 PDF 后点击“开始识别”。如果后端未启动，请先运行 FastAPI 服务。</div>
@@ -679,6 +797,15 @@
     const message = document.getElementById("message");
     const statusPill = document.getElementById("statusPill");
     const statusText = document.getElementById("statusText");
+    const uploadedCount = document.getElementById("uploadedCount");
+    const processedCount = document.getElementById("processedCount");
+    const processingCount = document.getElementById("processingCount");
+    const standardCount = document.getElementById("standardCount");
+    const passCount = document.getElementById("passCount");
+    const mismatchCount = document.getElementById("mismatchCount");
+    const missingCount = document.getElementById("missingCount");
+    const reviewCount = document.getElementById("reviewCount");
+    const summaryList = document.getElementById("summaryList");
     const taskId = document.getElementById("taskId");
     const pdfCount = document.getElementById("pdfCount");
     const tableCount = document.getElementById("tableCount");
@@ -698,6 +825,29 @@
         total_pages: 3,
         total_tables: 8,
         pdf_path: "tmp/uploads/25.918-1_A1_demo.pdf",
+        pdfs: [
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            status: "已处理",
+            table_count: 3,
+            standard_count: 2,
+            issue_count: 1
+          },
+          {
+            pdf_name: "14.751-1-A1(E-450401)_管口方位图.pdf",
+            status: "已处理",
+            table_count: 2,
+            standard_count: 2,
+            issue_count: 1
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            status: "已处理",
+            table_count: 3,
+            standard_count: 2,
+            issue_count: 1
+          }
+        ],
         drawing_info: {
           project_name: "南京石化炼油装置改造项目",
           unit_name: "加氢裂化联合装置",
@@ -881,6 +1031,15 @@
 
     function resetResult() {
       state.result = null;
+      uploadedCount.textContent = "0";
+      processedCount.textContent = "0";
+      processingCount.textContent = "0";
+      standardCount.textContent = "0";
+      passCount.textContent = "0";
+      mismatchCount.textContent = "0";
+      missingCount.textContent = "0";
+      reviewCount.textContent = "0";
+      summaryList.innerHTML = '<div class="empty">暂无审查结果</div>';
       taskId.textContent = "-";
       pdfCount.textContent = "0";
       tableCount.textContent = "0";
@@ -944,6 +1103,47 @@
       return "result-tag warn";
     }
 
+    function renderSummary(data, tables, standards, pdfCountValue, sourcePdfName) {
+      const pdfs = Array.isArray(data.pdfs) && data.pdfs.length
+        ? data.pdfs
+        : [{
+          pdf_name: sourcePdfName || "-",
+          status: standards.length || tables.length ? "已处理" : "待处理",
+          table_count: tables.length,
+          standard_count: standards.length,
+          issue_count: standards.filter((item) => item.result_type !== "pass").length
+        }];
+
+      const processed = pdfs.filter((item) => item.status === "已处理").length;
+      const processing = pdfs.filter((item) => item.status === "处理中").length;
+      const pass = standards.filter((item) => item.result_type === "pass").length;
+      const missing = standards.filter((item) => item.result_type === "error" || item.status === "标准库未命中").length;
+      const mismatch = standards.filter((item) => item.result_type === "warn").length;
+      const review = mismatch + missing;
+
+      uploadedCount.textContent = pdfCountValue;
+      processedCount.textContent = processed;
+      processingCount.textContent = processing;
+      standardCount.textContent = standards.length;
+      passCount.textContent = pass;
+      mismatchCount.textContent = mismatch;
+      missingCount.textContent = missing;
+      reviewCount.textContent = review;
+
+      summaryList.innerHTML = pdfs.map((item) => {
+        const tagType = item.status === "已处理" ? "pass" : "warn";
+        return `
+          <div class="summary-row">
+            <div>
+              <strong title="${item.pdf_name || "-"}">${item.pdf_name || "-"}</strong>
+              <div class="muted">${item.table_count || 0} 个表格 · ${item.standard_count || 0} 条标准 · ${item.issue_count || 0} 条需关注</div>
+            </div>
+            <span class="${standardTagClass(tagType)}">${item.status || "待处理"}</span>
+          </div>
+        `;
+      }).join("");
+    }
+
     function renderResult(payload) {
       const data = payload.data || {};
       const tables = Array.isArray(data.tables) ? data.tables : [];
@@ -954,6 +1154,7 @@
       taskId.textContent = data.task_id || "-";
       pdfCount.textContent = inferredPdfCount;
       tableCount.textContent = data.total_tables || tables.length;
+      renderSummary(data, tables, standards, inferredPdfCount, sourcePdfName);
       renderDrawingInfo(data.drawing_info || {});
       rawJson.textContent = JSON.stringify(payload, null, 2);
 
