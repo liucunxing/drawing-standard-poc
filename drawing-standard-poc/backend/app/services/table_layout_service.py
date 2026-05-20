@@ -290,7 +290,10 @@ class TableLayoutService:
                     refine_method="line_component",
                 )
 
+        tables = self._remove_duplicate_or_contained_tables(tables)
         for edge_bbox in self._detect_edge_table_bboxes(page_image, refine_padding=refine_padding):
+            if self._is_mostly_covered_by_existing_tables(edge_bbox, tables):
+                continue
             if any(self._bbox_iou(edge_bbox, tuple(table["bbox"])) >= self.EDGE_FALLBACK_IOU_THRESHOLD for table in tables):
                 continue
             self._append_table_crop(
@@ -300,11 +303,11 @@ class TableLayoutService:
                 task_table_dir=task_table_dir,
                 page_image_path=page_image_path,
                 bbox=edge_bbox,
-                label="edge_table_candidate",
+                label="bottom_grid_table_candidate",
                 score=0.0,
                 model_bbox=None,
                 padded_bbox=None,
-                refine_method="edge_grid",
+                refine_method="bottom_grid",
             )
 
         tables = self._remove_duplicate_or_contained_tables(tables)
@@ -523,7 +526,7 @@ class TableLayoutService:
         return self._dedupe_bboxes(sorted(candidates, key=self._bbox_area, reverse=True))
 
     def _detect_edge_table_bboxes(self, page_image: Any, refine_padding: int) -> List[BBox]:
-        """只在工程图常见边缘表格带中补漏，避免整页扫线造成大量过检。"""
+        """补页底连通表格块：按竖线簇拆分，避免把设备图线当表格。"""
         try:
             import cv2
             import numpy as np
@@ -541,17 +544,17 @@ class TableLayoutService:
             12,
         )
         height, width = binary.shape[:2]
+        if width > height:
+            return []
         horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(28, width // 90), 1))
         vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(22, height // 100)))
         horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
         vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
         table_lines = cv2.bitwise_or(horizontal, vertical)
-        table_lines = cv2.dilate(table_lines, np.ones((5, 5), dtype=np.uint8), iterations=1)
+        table_lines = cv2.dilate(table_lines, np.ones((3, 3), dtype=np.uint8), iterations=1)
 
         zones = [
-            self._ratio_bbox((0.04, 0.50, 0.98, 0.98), page_image.size),  # bottom table band
-            self._ratio_bbox((0.58, 0.02, 0.98, 0.98), page_image.size),  # right table/title band
-            self._ratio_bbox((0.00, 0.02, 0.20, 0.98), page_image.size),  # left border/title strip
+            self._ratio_bbox((0.03, 0.66, 0.98, 0.99), page_image.size),
         ]
 
         page_area = width * height
@@ -572,7 +575,18 @@ class TableLayoutService:
                     page_image.size,
                 )
                 area_ratio = self._bbox_area(bbox) / page_area if page_area else 0
-                if area_ratio < 0.0025 or area_ratio > 0.24:
+                if area_ratio > 0.18:
+                    candidates.extend(
+                        self._split_bottom_grid_component(
+                            horizontal=horizontal,
+                            vertical=vertical,
+                            component_bbox=bbox,
+                            image_size=page_image.size,
+                            refine_padding=refine_padding,
+                        )
+                    )
+                    continue
+                if area_ratio < 0.0025:
                     continue
                 if bbox[2] - bbox[0] < 130 or bbox[3] - bbox[1] < 70:
                     continue
@@ -582,7 +596,202 @@ class TableLayoutService:
                     continue
                 candidates.append(bbox)
 
-        return self._dedupe_bboxes(sorted(candidates, key=self._bbox_area, reverse=True))
+        merged = self._merge_complementary_edge_bboxes(candidates, page_image.size)
+        valid = [bbox for bbox in merged if self._is_valid_edge_grid_bbox(bbox, page_image.size)]
+        return self._dedupe_bboxes(sorted(valid, key=self._bbox_area, reverse=True))
+
+    def _split_bottom_grid_component(
+        self,
+        horizontal: Any,
+        vertical: Any,
+        component_bbox: BBox,
+        image_size: Tuple[int, int],
+        refine_padding: int,
+    ) -> List[BBox]:
+        try:
+            import numpy as np
+        except ImportError:
+            return []
+
+        image_width, image_height = image_size
+        x1, y1, x2, y2 = component_bbox
+        if x2 <= x1 or y2 <= y1:
+            return []
+
+        local_v = vertical[y1:y2, x1:x2]
+        col_hits = np.where(local_v.sum(axis=0) >= 255 * (y2 - y1) * 0.055)[0]
+        col_spans = self._merge_indices_to_spans(col_hits)
+        if len(col_spans) < 4:
+            return []
+
+        split_gap = max(115, int(image_width * 0.035))
+        groups: List[List[Tuple[int, int]]] = []
+        current = [col_spans[0]]
+        for span in col_spans[1:]:
+            gap = span[0] - current[-1][1]
+            if gap > split_gap:
+                groups.append(current)
+                current = [span]
+            else:
+                current.append(span)
+        groups.append(current)
+
+        candidates: List[BBox] = []
+        max_window_groups = 6
+        for start in range(len(groups)):
+            col_count = 0
+            for end in range(start, min(len(groups), start + max_window_groups)):
+                window = groups[start : end + 1]
+                col_count += len(groups[end])
+                if col_count < 4:
+                    continue
+                if len(window[0]) < 2 or len(window[-1]) < 2:
+                    continue
+
+                local_x1 = max(0, window[0][0][0] - refine_padding)
+                local_x2 = min(x2 - x1, window[-1][-1][1] + refine_padding)
+                group_width = local_x2 - local_x1
+                if group_width < 260 or group_width > image_width * 0.58:
+                    continue
+
+                horizontal_slice = horizontal[y1:y2, x1 + local_x1 : x1 + local_x2]
+                row_hits = np.where(horizontal_slice.sum(axis=1) >= 255 * group_width * 0.18)[0]
+                row_spans = self._merge_indices_to_spans(row_hits)
+                if len(row_spans) < 4:
+                    continue
+
+                local_y1 = max(0, row_spans[0][0] - refine_padding)
+                local_y2 = min(y2 - y1, row_spans[-1][1] + refine_padding)
+                candidate = self._clip_absolute_bbox(
+                    (x1 + local_x1, y1 + local_y1, x1 + local_x2, y1 + local_y2),
+                    image_size,
+                )
+                candidate = self._normalize_bottom_grid_bbox(candidate, image_size)
+                if not self._is_valid_edge_grid_bbox(candidate, image_size):
+                    continue
+                if not self._has_table_grid_signature(horizontal, vertical, candidate):
+                    continue
+                candidates.append(candidate)
+
+        return self._select_bottom_grid_candidates(candidates)
+
+    def _merge_complementary_edge_bboxes(
+        self,
+        bboxes: List[BBox],
+        image_size: Tuple[int, int],
+    ) -> List[BBox]:
+        merged = list(bboxes)
+        changed = True
+        while changed:
+            changed = False
+            next_round: List[BBox] = []
+            used = [False] * len(merged)
+            for i, first in enumerate(merged):
+                if used[i]:
+                    continue
+                current = first
+                for j in range(i + 1, len(merged)):
+                    if used[j]:
+                        continue
+                    second = merged[j]
+                    if not self._should_merge_edge_fragments(current, second, image_size):
+                        continue
+                    current = self._bbox_union(current, second)
+                    used[j] = True
+                    changed = True
+                used[i] = True
+                next_round.append(current)
+            merged = next_round
+        return merged
+
+    def _should_merge_edge_fragments(
+        self,
+        first: BBox,
+        second: BBox,
+        image_size: Tuple[int, int],
+    ) -> bool:
+        image_width, image_height = image_size
+        if image_width <= 0 or image_height <= 0:
+            return False
+
+        intersection = self._bbox_intersection(first, second)
+        if intersection <= 0:
+            return False
+
+        first_width = first[2] - first[0]
+        second_width = second[2] - second[0]
+        first_height = first[3] - first[1]
+        second_height = second[3] - second[1]
+        if min(first_width, second_width, first_height, second_height) <= 0:
+            return False
+
+        left_aligned = abs(first[0] - second[0]) <= max(32, int(image_width * 0.025))
+        bottom_aligned = abs(first[3] - second[3]) <= max(32, int(image_height * 0.025))
+        if not left_aligned and not bottom_aligned:
+            return False
+
+        overlap_width = max(0, min(first[2], second[2]) - max(first[0], second[0]))
+        overlap_height = max(0, min(first[3], second[3]) - max(first[1], second[1]))
+        width_overlap_ratio = overlap_width / min(first_width, second_width)
+        height_overlap_ratio = overlap_height / min(first_height, second_height)
+        if width_overlap_ratio < 0.45 and height_overlap_ratio < 0.25:
+            return False
+
+        union = self._bbox_union(first, second)
+        union_area_ratio = self._bbox_area(union) / (image_width * image_height)
+        return union_area_ratio <= 0.10
+
+    def _is_valid_edge_grid_bbox(self, bbox: BBox, image_size: Tuple[int, int]) -> bool:
+        image_width, image_height = image_size
+        if image_width <= 0 or image_height <= 0:
+            return False
+
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        if width <= 0 or height <= 0:
+            return False
+
+        width_ratio = width / image_width
+        height_ratio = height / image_height
+        area_ratio = self._bbox_area(bbox) / (image_width * image_height)
+        aspect_ratio = width / height
+        left_ratio = bbox[0] / image_width
+        right_ratio = bbox[2] / image_width
+        top_ratio = bbox[1] / image_height
+        bottom_ratio = bbox[3] / image_height
+
+        in_bottom_band = top_ratio >= 0.65 and bottom_ratio >= 0.78
+        left_or_middle_bottom = right_ratio < 0.75 and top_ratio >= 0.74
+        right_bottom = right_ratio >= 0.75
+        large_enough = width_ratio >= 0.20 and height_ratio >= 0.075
+        compact_enough = area_ratio <= 0.18 and aspect_ratio <= 9.5
+        not_border_strip = not (left_ratio <= 0.04 and right_ratio >= 0.93)
+
+        return (
+            in_bottom_band
+            and (left_or_middle_bottom or right_bottom)
+            and large_enough
+            and compact_enough
+            and not_border_strip
+            and area_ratio >= 0.0025
+        )
+
+    def _normalize_bottom_grid_bbox(self, bbox: BBox, image_size: Tuple[int, int]) -> BBox:
+        image_width, image_height = image_size
+        if image_width <= 0 or image_height <= 0:
+            return bbox
+
+        x1, y1, x2, y2 = bbox
+        left_ratio = x1 / image_width
+        right_ratio = x2 / image_width
+        top_ratio = y1 / image_height
+        bottom_ratio = y2 / image_height
+
+        if right_ratio >= 0.90 and left_ratio < 0.64 and top_ratio < 0.76 and bottom_ratio > 0.92:
+            x1 = max(x1, int(image_width * 0.66))
+            y2 = min(y2, int(image_height * 0.88))
+
+        return self._clip_absolute_bbox((x1, y1, x2, y2), image_size)
 
     def _has_table_grid_signature(self, horizontal: Any, vertical: Any, bbox: BBox) -> bool:
         try:
@@ -603,7 +812,7 @@ class TableLayoutService:
         col_hits = np.where(local_v.sum(axis=0) >= 255 * height * 0.12)[0]
         row_spans = self._merge_indices_to_spans(row_hits)
         col_spans = self._merge_indices_to_spans(col_hits)
-        if len(row_spans) < 3 or len(col_spans) < 3:
+        if len(row_spans) < 4 or len(col_spans) < 4:
             return False
 
         intersection = cv2.bitwise_and(
@@ -611,8 +820,21 @@ class TableLayoutService:
             cv2.dilate(local_v, np.ones((3, 3), dtype=np.uint8), iterations=1),
         )
         intersection_count = int((intersection > 0).sum())
-        min_intersections = max(24, len(row_spans) * len(col_spans) // 4)
-        return intersection_count >= min_intersections
+        min_intersections = max(36, len(row_spans) * len(col_spans) // 3)
+        if intersection_count < min_intersections:
+            return False
+
+        sampled_intersections = 0
+        for row_start, row_end in row_spans:
+            y = (row_start + row_end) // 2
+            for col_start, col_end in col_spans:
+                x = (col_start + col_end) // 2
+                patch = intersection[max(0, y - 2) : min(height, y + 3), max(0, x - 2) : min(width, x + 3)]
+                if patch.any():
+                    sampled_intersections += 1
+
+        min_sampled = max(8, min(len(row_spans), 10) * min(len(col_spans), 10) // 4)
+        return sampled_intersections >= min_sampled
 
     def _split_container_bbox(self, page_image: Any, container_bbox: BBox, refine_padding: int) -> List[BBox]:
         """把右侧整列/大容器框按表格线间距拆成较少的主表格块。"""
@@ -815,6 +1037,15 @@ class TableLayoutService:
                 if containment < self.CONTAINMENT_THRESHOLD and iou < self.DUPLICATE_IOU_THRESHOLD:
                     continue
 
+                first_method = str(first.get("refine_method") or "")
+                second_method = str(second.get("refine_method") or "")
+                if first_method == "bottom_grid" and first_area >= second_area:
+                    keep[j] = False
+                    continue
+                if second_method == "bottom_grid" and second_area >= first_area:
+                    keep[i] = False
+                    break
+
                 if first_area > second_area * 1.25:
                     keep[i] = False
                     break
@@ -832,6 +1063,16 @@ class TableLayoutService:
 
         return [table for table, should_keep in zip(tables, keep) if should_keep]
 
+    def _is_mostly_covered_by_existing_tables(self, bbox: BBox, tables: List[Dict[str, Any]]) -> bool:
+        bbox_area = self._bbox_area(bbox)
+        if bbox_area <= 0:
+            return False
+        return any(
+            self._bbox_intersection(bbox, tuple(table["bbox"])) / bbox_area >= 0.45
+            for table in tables
+            if table.get("refine_method") != "bottom_grid"
+        )
+
     def _dedupe_bboxes(self, bboxes: List[BBox]) -> List[BBox]:
         kept: List[BBox] = []
         for bbox in bboxes:
@@ -839,6 +1080,41 @@ class TableLayoutService:
                 continue
             kept.append(bbox)
         return kept
+
+    def _remove_contained_bboxes(self, bboxes: List[BBox]) -> List[BBox]:
+        kept: List[BBox] = []
+        for bbox in sorted(bboxes, key=self._bbox_area, reverse=True):
+            bbox_area = self._bbox_area(bbox)
+            if bbox_area <= 0:
+                continue
+            if any(self._bbox_intersection(bbox, existing) / bbox_area >= 0.86 for existing in kept):
+                continue
+            if any(self._bbox_iou(bbox, existing) >= self.EDGE_FALLBACK_IOU_THRESHOLD for existing in kept):
+                continue
+            kept.append(bbox)
+        return kept
+
+    def _select_bottom_grid_candidates(self, bboxes: List[BBox]) -> List[BBox]:
+        kept: List[BBox] = []
+        for bbox in sorted(bboxes, key=lambda item: (self._bbox_area(item), item[1], item[0])):
+            bbox_area = self._bbox_area(bbox)
+            if bbox_area <= 0:
+                continue
+            if any(self._bottom_grid_overlaps_existing(bbox, existing) for existing in kept):
+                continue
+            kept.append(bbox)
+        return sorted(kept, key=lambda item: (item[1], item[0]))
+
+    def _bottom_grid_overlaps_existing(self, bbox: BBox, existing: BBox) -> bool:
+        bbox_area = self._bbox_area(bbox)
+        existing_area = self._bbox_area(existing)
+        if bbox_area <= 0 or existing_area <= 0:
+            return False
+        overlap = self._bbox_intersection(bbox, existing)
+        if overlap <= 0:
+            return False
+        overlap_of_smaller = overlap / min(bbox_area, existing_area)
+        return overlap_of_smaller >= 0.45 or self._bbox_iou(bbox, existing) >= self.EDGE_FALLBACK_IOU_THRESHOLD
 
     def _bbox_iou(self, first: BBox, second: BBox) -> float:
         intersection = self._bbox_intersection(first, second)
@@ -853,6 +1129,14 @@ class TableLayoutService:
         x2 = min(first[2], second[2])
         y2 = min(first[3], second[3])
         return self._bbox_area((x1, y1, x2, y2))
+
+    def _bbox_union(self, first: BBox, second: BBox) -> BBox:
+        return (
+            min(first[0], second[0]),
+            min(first[1], second[1]),
+            max(first[2], second[2]),
+            max(first[3], second[3]),
+        )
 
     def _clip_bbox(self, coordinate: Any, image_size: Tuple[int, int], padding: int) -> Optional[BBox]:
         rect = self._coordinate_to_rect(coordinate)

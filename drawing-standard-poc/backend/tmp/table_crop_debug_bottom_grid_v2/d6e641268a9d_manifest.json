@@ -1,0 +1,122 @@
+{
+  "task_id": "d6e641268a9d",
+  "filename": "25.918-1 A1.pdf",
+  "pdf_path": "data\\samples\\pdf\\25.918-1 A1.pdf",
+  "render_scale": 2.0,
+  "score_threshold": 0.45,
+  "crop_padding": 16,
+  "refine_padding": 8,
+  "enable_line_fallback": false,
+  "total_pages": 1,
+  "total_tables": 3,
+  "page_images": [
+    {
+      "page": 1,
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_bottom_grid_v2\\artifacts\\page_images\\d6e641268a9d\\page_001.png",
+      "width": 3368,
+      "height": 4768,
+      "pdf_width": 1684.0,
+      "pdf_height": 2384.0,
+      "render_scale": 2.0
+    }
+  ],
+  "tables": [
+    {
+      "label": "table",
+      "score": 0.6113477945327759,
+      "bbox": [
+        2273,
+        2190,
+        3319,
+        2734
+      ],
+      "model_bbox": [
+        2278,
+        2214,
+        3295,
+        2710
+      ],
+      "padded_bbox": [
+        2262,
+        2198,
+        3311,
+        2726
+      ],
+      "refine_method": "line_refine",
+      "width": 1046,
+      "height": 544,
+      "page": 1,
+      "table_index": 1,
+      "table_id": "p001_t001",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_bottom_grid_v2\\artifacts\\table_blocks\\d6e641268a9d\\page_001_table_001.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_bottom_grid_v2\\artifacts\\page_images\\d6e641268a9d\\page_001.png"
+    },
+    {
+      "label": "table_split",
+      "score": 0.5007586479187012,
+      "bbox": [
+        2277,
+        74,
+        3302,
+        1527
+      ],
+      "model_bbox": [
+        2277,
+        74,
+        3317,
+        4685
+      ],
+      "padded_bbox": [
+        2277,
+        74,
+        3317,
+        4685
+      ],
+      "refine_method": "container_split",
+      "width": 1025,
+      "height": 1453,
+      "page": 1,
+      "table_index": 2,
+      "table_id": "p001_t002",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_bottom_grid_v2\\artifacts\\table_blocks\\d6e641268a9d\\page_001_table_002.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_bottom_grid_v2\\artifacts\\page_images\\d6e641268a9d\\page_001.png"
+    },
+    {
+      "label": "table_split",
+      "score": 0.5007586479187012,
+      "bbox": [
+        2277,
+        3297,
+        3302,
+        4656
+      ],
+      "model_bbox": [
+        2277,
+        74,
+        3317,
+        4685
+      ],
+      "padded_bbox": [
+        2277,
+        74,
+        3317,
+        4685
+      ],
+      "refine_method": "container_split",
+      "width": 1025,
+      "height": 1359,
+      "page": 1,
+      "table_index": 3,
+      "table_id": "p001_t003",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_bottom_grid_v2\\artifacts\\table_blocks\\d6e641268a9d\\page_001_table_003.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_bottom_grid_v2\\artifacts\\page_images\\d6e641268a9d\\page_001.png"
+    }
+  ],
+  "overlay_images": [
+    "drawing-standard-poc\\backend\\tmp\\table_crop_debug_bottom_grid_v2\\overlays\\25.918-1 A1_page_001_overlay.png"
+  ],
+  "legend": {
+    "orange_box": "Paddle/LayoutDetection 原始模型框",
+    "red_box": "最终裁剪框，优先使用表格线精裁结果"
+  }
+}

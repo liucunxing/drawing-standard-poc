@@ -151,6 +151,46 @@ class TableLayoutServiceTest(unittest.TestCase):
         self.assertTrue(service._is_container_like((2250, 70, 3340, 4700), (3356, 4752)))
         self.assertFalse(service._is_container_like((2250, 2190, 3320, 2734), (3356, 4752)))
 
+    def test_bottom_grid_accepts_page_bottom_tables_only(self):
+        service = TableLayoutService(layout_engine=object())
+        image_size = (3368, 4768)
+        fragments = [(266, 4328, 1135, 4687), (1275, 3614, 2285, 4687), (254, 1899, 1705, 2534)]
+
+        merged = service._merge_complementary_edge_bboxes(fragments, image_size)
+        valid = [bbox for bbox in merged if service._is_valid_edge_grid_bbox(bbox, image_size)]
+
+        self.assertEqual(valid, [(266, 4328, 1135, 4687), (1275, 3614, 2285, 4687)])
+
+    def test_remove_duplicate_prefers_larger_bottom_grid_over_partial_crop(self):
+        service = TableLayoutService(layout_engine=object())
+        tables = [
+            {"bbox": [2274, 4059, 3305, 4354], "score": 0.5, "label": "table", "refine_method": "line_refine"},
+            {"bbox": [2282, 3146, 3294, 4687], "score": 0.0, "label": "table", "refine_method": "bottom_grid"},
+        ]
+
+        kept = service._remove_duplicate_or_contained_tables(tables)
+
+        self.assertEqual([table["refine_method"] for table in kept], ["bottom_grid"])
+
+    def test_bottom_grid_candidate_selection_prefers_tight_non_overlapping_boxes(self):
+        service = TableLayoutService(layout_engine=object())
+        candidates = [
+            (149, 4040, 1135, 4695),
+            (788, 3567, 2405, 4695),
+            (149, 3645, 1872, 4695),
+        ]
+
+        kept = service._select_bottom_grid_candidates(candidates)
+
+        self.assertEqual(kept, [(788, 3567, 2405, 4695), (149, 4040, 1135, 4695)])
+
+    def test_normalize_bottom_grid_trims_right_side_title_block(self):
+        service = TableLayoutService(layout_engine=object())
+
+        trimmed = service._normalize_bottom_grid_bbox((1798, 3150, 3303, 4696), (3368, 4768))
+
+        self.assertEqual(trimmed, (2222, 3150, 3303, 4195))
+
     def test_safe_stem_removes_path_and_invalid_filename_chars(self):
         service = TableLayoutService(layout_engine=object())
 
