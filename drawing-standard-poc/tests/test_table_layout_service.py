@@ -122,6 +122,7 @@ class TableLayoutServiceTest(unittest.TestCase):
                 score_threshold=0.45,
                 crop_padding=18,
                 refine_padding=4,
+                enable_line_fallback=False,
             )
 
             self.assertEqual(len(tables), 1)
@@ -131,6 +132,24 @@ class TableLayoutServiceTest(unittest.TestCase):
             self.assertGreaterEqual(tables[0]["bbox"][2], 170)
             self.assertLess(tables[0]["width"], 150)
             self.assertTrue((table_dir / "page_001_table_001.png").exists())
+
+    def test_remove_duplicate_or_contained_tables_drops_container(self):
+        service = TableLayoutService(layout_engine=object())
+        tables = [
+            {"bbox": [10, 10, 210, 210], "score": 0.5, "label": "table", "refine_method": "line_refine"},
+            {"bbox": [20, 20, 100, 100], "score": 0.8, "label": "table", "refine_method": "line_refine"},
+            {"bbox": [120, 120, 200, 200], "score": 0.7, "label": "table", "refine_method": "line_refine"},
+        ]
+
+        kept = service._remove_duplicate_or_contained_tables(tables)
+
+        self.assertEqual([table["bbox"] for table in kept], [[20, 20, 100, 100], [120, 120, 200, 200]])
+
+    def test_container_like_detects_tall_right_side_region(self):
+        service = TableLayoutService(layout_engine=object())
+
+        self.assertTrue(service._is_container_like((2250, 70, 3340, 4700), (3356, 4752)))
+        self.assertFalse(service._is_container_like((2250, 2190, 3320, 2734), (3356, 4752)))
 
     def test_safe_stem_removes_path_and_invalid_filename_chars(self):
         service = TableLayoutService(layout_engine=object())

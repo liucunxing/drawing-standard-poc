@@ -1,0 +1,452 @@
+{
+  "task_id": "a94b0a74949a",
+  "filename": "02.194-1-A1(E-420310).pdf",
+  "pdf_path": "data\\samples\\pdf\\02.194-1-A1(E-420310).pdf",
+  "render_scale": 2.0,
+  "score_threshold": 0.45,
+  "crop_padding": 16,
+  "refine_padding": 8,
+  "enable_line_fallback": false,
+  "total_pages": 1,
+  "total_tables": 18,
+  "page_images": [
+    {
+      "page": 1,
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png",
+      "width": 4768,
+      "height": 3368,
+      "pdf_width": 2384.0,
+      "pdf_height": 1684.0,
+      "render_scale": 2.0
+    }
+  ],
+  "tables": [
+    {
+      "label": "table",
+      "score": 0.919460654258728,
+      "bbox": [
+        2639,
+        1762,
+        3684,
+        3315
+      ],
+      "model_bbox": [
+        2663,
+        1786,
+        3660,
+        3291
+      ],
+      "padded_bbox": [
+        2647,
+        1770,
+        3676,
+        3307
+      ],
+      "refine_method": "line_refine",
+      "width": 1045,
+      "height": 1553,
+      "page": 1,
+      "table_index": 1,
+      "table_id": "p001_t001",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_001.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "table",
+      "score": 0.7363531589508057,
+      "bbox": [
+        3644,
+        2710,
+        4717,
+        2962
+      ],
+      "model_bbox": [
+        3668,
+        2734,
+        4693,
+        2938
+      ],
+      "padded_bbox": [
+        3652,
+        2718,
+        4709,
+        2954
+      ],
+      "refine_method": "line_refine",
+      "width": 1073,
+      "height": 252,
+      "page": 1,
+      "table_index": 2,
+      "table_id": "p001_t002",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_002.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "table",
+      "score": 0.6831623315811157,
+      "bbox": [
+        3638,
+        2212,
+        4731,
+        2708
+      ],
+      "model_bbox": [
+        3662,
+        2236,
+        4707,
+        2684
+      ],
+      "padded_bbox": [
+        3646,
+        2220,
+        4723,
+        2700
+      ],
+      "refine_method": "line_refine",
+      "width": 1093,
+      "height": 496,
+      "page": 1,
+      "table_index": 3,
+      "table_id": "p001_t003",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_003.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "table",
+      "score": 0.6790229082107544,
+      "bbox": [
+        3641,
+        1826,
+        4727,
+        2210
+      ],
+      "model_bbox": [
+        3665,
+        1850,
+        4703,
+        2186
+      ],
+      "padded_bbox": [
+        3649,
+        1834,
+        4719,
+        2202
+      ],
+      "refine_method": "line_refine",
+      "width": 1086,
+      "height": 384,
+      "page": 1,
+      "table_index": 4,
+      "table_id": "p001_t004",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_004.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "table",
+      "score": 0.6167834997177124,
+      "bbox": [
+        3644,
+        125,
+        4732,
+        1851
+      ],
+      "model_bbox": [
+        3668,
+        149,
+        4708,
+        1827
+      ],
+      "padded_bbox": [
+        3652,
+        133,
+        4724,
+        1843
+      ],
+      "refine_method": "line_refine",
+      "width": 1088,
+      "height": 1726,
+      "page": 1,
+      "table_index": 5,
+      "table_id": "p001_t005",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_005.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "table",
+      "score": 0.5512175559997559,
+      "bbox": [
+        4324,
+        3007,
+        4711,
+        3279
+      ],
+      "model_bbox": [
+        4348,
+        3031,
+        4687,
+        3255
+      ],
+      "padded_bbox": [
+        4332,
+        3015,
+        4703,
+        3271
+      ],
+      "refine_method": "line_refine",
+      "width": 387,
+      "height": 272,
+      "page": 1,
+      "table_index": 6,
+      "table_id": "p001_t006",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_006.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        447,
+        258,
+        961,
+        1109
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 514,
+      "height": 851,
+      "page": 1,
+      "table_index": 7,
+      "table_id": "p001_t007",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_007.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        272,
+        2166,
+        983,
+        2707
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 711,
+      "height": 541,
+      "page": 1,
+      "table_index": 8,
+      "table_id": "p001_t008",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_008.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        2801,
+        284,
+        3352,
+        965
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 551,
+      "height": 681,
+      "page": 1,
+      "table_index": 9,
+      "table_id": "p001_t009",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_009.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        309,
+        1676,
+        1468,
+        1952
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 1159,
+      "height": 276,
+      "page": 1,
+      "table_index": 10,
+      "table_id": "p001_t010",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_010.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        309,
+        1473,
+        961,
+        1952
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 652,
+      "height": 479,
+      "page": 1,
+      "table_index": 11,
+      "table_id": "p001_t011",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_011.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        1172,
+        2170,
+        1584,
+        2511
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 412,
+      "height": 341,
+      "page": 1,
+      "table_index": 12,
+      "table_id": "p001_t012",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_012.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        1570,
+        2888,
+        1974,
+        3227
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 404,
+      "height": 339,
+      "page": 1,
+      "table_index": 13,
+      "table_id": "p001_t013",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_013.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        1129,
+        2881,
+        1482,
+        3204
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 353,
+      "height": 323,
+      "page": 1,
+      "table_index": 14,
+      "table_id": "p001_t014",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_014.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        292,
+        2939,
+        732,
+        3186
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 440,
+      "height": 247,
+      "page": 1,
+      "table_index": 15,
+      "table_id": "p001_t015",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_015.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        1781,
+        2190,
+        2132,
+        2496
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 351,
+      "height": 306,
+      "page": 1,
+      "table_index": 16,
+      "table_id": "p001_t016",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_016.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        1917,
+        1770,
+        2232,
+        1990
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 315,
+      "height": 220,
+      "page": 1,
+      "table_index": 17,
+      "table_id": "p001_t017",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_017.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        2054,
+        2944,
+        2280,
+        3150
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 226,
+      "height": 206,
+      "page": 1,
+      "table_index": 18,
+      "table_id": "p001_t018",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\a94b0a74949a\\page_001_table_018.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\a94b0a74949a\\page_001.png"
+    }
+  ],
+  "overlay_images": [
+    "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\overlays\\02.194-1-A1(E-420310)_page_001_overlay.png"
+  ],
+  "legend": {
+    "orange_box": "Paddle/LayoutDetection 原始模型框",
+    "red_box": "最终裁剪框，优先使用表格线精裁结果"
+  }
+}

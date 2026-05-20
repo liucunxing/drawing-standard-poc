@@ -13,6 +13,7 @@ REPO_ROOT = INNER_PROJECT_DIR.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
 from app.services.table_layout_service import TableLayoutService
+from validate_table_crop_manifest import validate_manifest
 
 
 def iter_pdf_paths(input_path: Path) -> List[Path]:
@@ -99,13 +100,18 @@ def main() -> int:
         action="store_true",
         help="启用整页线条兜底候选。默认关闭，避免把图框碎片裁成几十张。",
     )
+    parser.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="只生成图片，不执行 manifest 回归校验。",
+    )
     args = parser.parse_args()
 
     input_path = Path(args.pdf)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    service = TableLayoutService()
+    service = TableLayoutService(base_dir=output_dir / "artifacts")
     pdf_paths = iter_pdf_paths(input_path)
     if not pdf_paths:
         raise RuntimeError(f"没有找到 PDF: {input_path}")
@@ -113,6 +119,7 @@ def main() -> int:
     print(f"发现 {len(pdf_paths)} 个 PDF，开始运行 Paddle 表格识别...")
     print(f"输出目录: {output_dir}")
 
+    manifest_paths: List[Path] = []
     for pdf_path in pdf_paths:
         print(f"\n处理: {pdf_path}")
         result = service.extract_tables_from_pdf_path(
@@ -126,6 +133,7 @@ def main() -> int:
         )
         overlay_paths = draw_page_overlays(result, output_dir)
         manifest_path = copy_manifest(result, overlay_paths, output_dir)
+        manifest_paths.append(manifest_path)
 
         print(f"任务 ID: {result['task_id']}")
         print(f"页数: {result['total_pages']}，表格数: {result['total_tables']}")
@@ -138,6 +146,20 @@ def main() -> int:
         print(f"明细 JSON: {manifest_path}")
 
     print("\n完成。红框是最终裁剪框，橙框是 Paddle 模型原始框。")
+    if args.skip_validation:
+        return 0
+
+    errors: List[str] = []
+    for manifest_path in manifest_paths:
+        errors.extend(validate_manifest(manifest_path))
+
+    if errors:
+        print("\n回归校验失败：")
+        for error in errors:
+            print(f"- {error}")
+        return 1
+
+    print("\n回归校验通过：未发现少检、过检、重复或包含框。")
     return 0
 
 

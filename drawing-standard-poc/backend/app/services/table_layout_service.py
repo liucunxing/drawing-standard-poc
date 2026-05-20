@@ -29,8 +29,12 @@ class TableLayoutService:
     MIN_TABLE_SIDE = 16
     MIN_LINE_COMPONENT_AREA_RATIO = 0.004
     MAX_TABLE_AREA_RATIO = 0.55
+    CONTAINER_AREA_RATIO = 0.16
+    CONTAINER_HEIGHT_RATIO = 0.62
     WHOLE_PAGE_SIDE_RATIO = 0.88
     DUPLICATE_IOU_THRESHOLD = 0.72
+    CONTAINMENT_THRESHOLD = 0.90
+    EDGE_FALLBACK_IOU_THRESHOLD = 0.55
     TABLE_LABEL_KEYWORDS = ("table", "表格")
 
     def __init__(self, base_dir: Optional[Path] = None, layout_engine: Any = None):
@@ -228,6 +232,25 @@ class TableLayoutService:
             if self._is_whole_page_like(raw_bbox, page_image.size):
                 continue
 
+            if self._is_container_like(raw_bbox, page_image.size):
+                split_bboxes = self._split_container_bbox(page_image, raw_bbox, refine_padding)
+                if split_bboxes:
+                    for split_bbox in split_bboxes:
+                        self._append_table_crop(
+                            tables=tables,
+                            page_image=page_image,
+                            page_idx=page_idx,
+                            task_table_dir=task_table_dir,
+                            page_image_path=page_image_path,
+                            bbox=split_bbox,
+                            label=f"{label}_split",
+                            score=score,
+                            model_bbox=raw_bbox,
+                            padded_bbox=raw_bbox,
+                            refine_method="container_split",
+                        )
+                    continue
+
             padded_bbox = self._expand_bbox(raw_bbox, page_image.size, crop_padding)
             precise_bbox, refine_method = self._refine_table_bbox(page_image, padded_bbox, refine_padding)
             crop_bbox = precise_bbox or padded_bbox
@@ -267,7 +290,31 @@ class TableLayoutService:
                     refine_method="line_component",
                 )
 
-        return tables
+        for edge_bbox in self._detect_edge_table_bboxes(page_image, refine_padding=refine_padding):
+            if any(self._bbox_iou(edge_bbox, tuple(table["bbox"])) >= self.EDGE_FALLBACK_IOU_THRESHOLD for table in tables):
+                continue
+            self._append_table_crop(
+                tables=tables,
+                page_image=page_image,
+                page_idx=page_idx,
+                task_table_dir=task_table_dir,
+                page_image_path=page_image_path,
+                bbox=edge_bbox,
+                label="edge_table_candidate",
+                score=0.0,
+                model_bbox=None,
+                padded_bbox=None,
+                refine_method="edge_grid",
+            )
+
+        tables = self._remove_duplicate_or_contained_tables(tables)
+        return self._save_table_crops(
+            tables=tables,
+            page_image=page_image,
+            page_idx=page_idx,
+            task_table_dir=task_table_dir,
+            page_image_path=page_image_path,
+        )
 
     def _append_table_crop(
         self,
@@ -283,16 +330,8 @@ class TableLayoutService:
         padded_bbox: Optional[BBox],
         refine_method: str,
     ) -> None:
-        table_index = len(tables) + 1
-        block_name = f"page_{page_idx:03d}_table_{table_index:03d}.png"
-        block_path = task_table_dir / block_name
-        page_image.crop(bbox).save(block_path)
-
         tables.append(
             {
-                "page": page_idx,
-                "table_index": table_index,
-                "table_id": f"p{page_idx:03d}_t{table_index:03d}",
                 "label": label,
                 "score": score,
                 "bbox": list(bbox),
@@ -301,10 +340,37 @@ class TableLayoutService:
                 "refine_method": refine_method,
                 "width": bbox[2] - bbox[0],
                 "height": bbox[3] - bbox[1],
-                "image_path": str(block_path),
-                "source_page_image": str(page_image_path),
             }
         )
+
+    def _save_table_crops(
+        self,
+        tables: List[Dict[str, Any]],
+        page_image: Any,
+        page_idx: int,
+        task_table_dir: Path,
+        page_image_path: Path,
+    ) -> List[Dict[str, Any]]:
+        finalized: List[Dict[str, Any]] = []
+        for table_index, table in enumerate(tables, start=1):
+            bbox = tuple(table["bbox"])
+            block_name = f"page_{page_idx:03d}_table_{table_index:03d}.png"
+            block_path = task_table_dir / block_name
+            page_image.crop(bbox).save(block_path)
+
+            finalized.append(
+                {
+                    **table,
+                    "page": page_idx,
+                    "table_index": table_index,
+                    "table_id": f"p{page_idx:03d}_t{table_index:03d}",
+                    "width": bbox[2] - bbox[0],
+                    "height": bbox[3] - bbox[1],
+                    "image_path": str(block_path),
+                    "source_page_image": str(page_image_path),
+                }
+            )
+        return finalized
 
     def _normalize_layout_boxes(self, output: Any) -> List[Dict[str, Any]]:
         boxes: List[Any] = []
@@ -456,6 +522,191 @@ class TableLayoutService:
 
         return self._dedupe_bboxes(sorted(candidates, key=self._bbox_area, reverse=True))
 
+    def _detect_edge_table_bboxes(self, page_image: Any, refine_padding: int) -> List[BBox]:
+        """只在工程图常见边缘表格带中补漏，避免整页扫线造成大量过检。"""
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            return []
+
+        crop_np = np.array(page_image.convert("RGB"))
+        gray = cv2.cvtColor(crop_np, cv2.COLOR_RGB2GRAY)
+        binary = cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            31,
+            12,
+        )
+        height, width = binary.shape[:2]
+        horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(28, width // 90), 1))
+        vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(22, height // 100)))
+        horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
+        vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
+        table_lines = cv2.bitwise_or(horizontal, vertical)
+        table_lines = cv2.dilate(table_lines, np.ones((5, 5), dtype=np.uint8), iterations=1)
+
+        zones = [
+            self._ratio_bbox((0.04, 0.50, 0.98, 0.98), page_image.size),  # bottom table band
+            self._ratio_bbox((0.58, 0.02, 0.98, 0.98), page_image.size),  # right table/title band
+            self._ratio_bbox((0.00, 0.02, 0.20, 0.98), page_image.size),  # left border/title strip
+        ]
+
+        page_area = width * height
+        candidates: List[BBox] = []
+        for zone in zones:
+            zx1, zy1, zx2, zy2 = zone
+            zone_mask = table_lines[zy1:zy2, zx1:zx2]
+            contours, _ = cv2.findContours(zone_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                x, y, w, h = cv2.boundingRect(contour)
+                bbox = self._clip_absolute_bbox(
+                    (
+                        zx1 + x - refine_padding,
+                        zy1 + y - refine_padding,
+                        zx1 + x + w + refine_padding,
+                        zy1 + y + h + refine_padding,
+                    ),
+                    page_image.size,
+                )
+                area_ratio = self._bbox_area(bbox) / page_area if page_area else 0
+                if area_ratio < 0.0025 or area_ratio > 0.24:
+                    continue
+                if bbox[2] - bbox[0] < 130 or bbox[3] - bbox[1] < 70:
+                    continue
+                if self._is_whole_page_like(bbox, page_image.size):
+                    continue
+                if not self._has_table_grid_signature(horizontal, vertical, bbox):
+                    continue
+                candidates.append(bbox)
+
+        return self._dedupe_bboxes(sorted(candidates, key=self._bbox_area, reverse=True))
+
+    def _has_table_grid_signature(self, horizontal: Any, vertical: Any, bbox: BBox) -> bool:
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            return False
+
+        x1, y1, x2, y2 = bbox
+        width = x2 - x1
+        height = y2 - y1
+        if width <= 0 or height <= 0:
+            return False
+
+        local_h = horizontal[y1:y2, x1:x2]
+        local_v = vertical[y1:y2, x1:x2]
+        row_hits = np.where(local_h.sum(axis=1) >= 255 * width * 0.16)[0]
+        col_hits = np.where(local_v.sum(axis=0) >= 255 * height * 0.12)[0]
+        row_spans = self._merge_indices_to_spans(row_hits)
+        col_spans = self._merge_indices_to_spans(col_hits)
+        if len(row_spans) < 3 or len(col_spans) < 3:
+            return False
+
+        intersection = cv2.bitwise_and(
+            cv2.dilate(local_h, np.ones((3, 3), dtype=np.uint8), iterations=1),
+            cv2.dilate(local_v, np.ones((3, 3), dtype=np.uint8), iterations=1),
+        )
+        intersection_count = int((intersection > 0).sum())
+        min_intersections = max(24, len(row_spans) * len(col_spans) // 4)
+        return intersection_count >= min_intersections
+
+    def _split_container_bbox(self, page_image: Any, container_bbox: BBox, refine_padding: int) -> List[BBox]:
+        """把右侧整列/大容器框按表格线间距拆成较少的主表格块。"""
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            return []
+
+        x1, y1, x2, y2 = container_bbox
+        crop = page_image.crop(container_bbox)
+        crop_np = np.array(crop.convert("RGB"))
+        gray = cv2.cvtColor(crop_np, cv2.COLOR_RGB2GRAY)
+        binary = cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            31,
+            12,
+        )
+        height, width = binary.shape[:2]
+        if width <= 0 or height <= 0:
+            return []
+
+        horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(24, width // 8), 1))
+        vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(18, height // 70)))
+        horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
+        vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
+
+        row_threshold = 255 * width * 0.22
+        row_hits = np.where(horizontal.sum(axis=1) >= row_threshold)[0]
+        line_spans = self._merge_indices_to_spans(row_hits)
+        if len(line_spans) < 3:
+            return []
+
+        split_gap = max(120, int(height * 0.035))
+        groups: List[List[Tuple[int, int]]] = []
+        current = [line_spans[0]]
+        for span in line_spans[1:]:
+            gap = span[0] - current[-1][1]
+            if gap > split_gap:
+                groups.append(current)
+                current = [span]
+            else:
+                current.append(span)
+        groups.append(current)
+
+        candidates: List[BBox] = []
+        for group in groups:
+            if len(group) < 3:
+                continue
+            local_y1 = max(0, group[0][0] - refine_padding)
+            local_y2 = min(height, group[-1][1] + refine_padding)
+            if local_y2 - local_y1 < 60:
+                continue
+
+            vertical_slice = vertical[local_y1:local_y2, :]
+            col_threshold = 255 * max(1, local_y2 - local_y1) * 0.12
+            col_hits = np.where(vertical_slice.sum(axis=0) >= col_threshold)[0]
+            if len(col_hits) > 0:
+                local_x1 = max(0, int(col_hits[0]) - refine_padding)
+                local_x2 = min(width, int(col_hits[-1]) + refine_padding)
+            else:
+                local_x1, local_x2 = 0, width
+
+            bbox = self._clip_absolute_bbox(
+                (x1 + local_x1, y1 + local_y1, x1 + local_x2, y1 + local_y2),
+                page_image.size,
+            )
+            if self._bbox_area(bbox) < self._bbox_area(container_bbox) * 0.03:
+                continue
+            if self._is_whole_page_like(bbox, page_image.size):
+                continue
+            candidates.append(bbox)
+
+        return self._dedupe_bboxes(candidates)
+
+    def _merge_indices_to_spans(self, indices: Any) -> List[Tuple[int, int]]:
+        values = [int(value) for value in indices]
+        if not values:
+            return []
+
+        spans: List[Tuple[int, int]] = []
+        start = previous = values[0]
+        for value in values[1:]:
+            if value <= previous + 1:
+                previous = value
+                continue
+            spans.append((start, previous + 1))
+            start = previous = value
+        spans.append((start, previous + 1))
+        return spans
+
     def _largest_contour_bbox(self, mask: Any, min_area_ratio: float) -> Optional[BBox]:
         import cv2
 
@@ -523,6 +774,64 @@ class TableLayoutService:
             width_ratio > self.WHOLE_PAGE_SIDE_RATIO and height_ratio > self.WHOLE_PAGE_SIDE_RATIO
         )
 
+    def _is_container_like(self, bbox: BBox, image_size: Tuple[int, int]) -> bool:
+        image_width, image_height = image_size
+        if image_width <= 0 or image_height <= 0:
+            return False
+        bbox_width = bbox[2] - bbox[0]
+        bbox_height = bbox[3] - bbox[1]
+        width_ratio = bbox_width / image_width
+        height_ratio = bbox_height / image_height
+        area_ratio = self._bbox_area(bbox) / (image_width * image_height)
+        return (
+            area_ratio >= self.CONTAINER_AREA_RATIO
+            and height_ratio >= self.CONTAINER_HEIGHT_RATIO
+            and width_ratio <= 0.55
+        )
+
+    def _remove_duplicate_or_contained_tables(self, tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        keep = [True] * len(tables)
+        for i, first in enumerate(tables):
+            if not keep[i]:
+                continue
+            first_bbox = tuple(first["bbox"])
+            first_area = self._bbox_area(first_bbox)
+            for j in range(i + 1, len(tables)):
+                if not keep[j]:
+                    continue
+                second = tables[j]
+                second_bbox = tuple(second["bbox"])
+                second_area = self._bbox_area(second_bbox)
+                if first_area <= 0 or second_area <= 0:
+                    continue
+
+                overlap = self._bbox_intersection(first_bbox, second_bbox)
+                if overlap <= 0:
+                    continue
+
+                smaller_area = min(first_area, second_area)
+                containment = overlap / smaller_area
+                iou = overlap / (first_area + second_area - overlap)
+                if containment < self.CONTAINMENT_THRESHOLD and iou < self.DUPLICATE_IOU_THRESHOLD:
+                    continue
+
+                if first_area > second_area * 1.25:
+                    keep[i] = False
+                    break
+                if second_area > first_area * 1.25:
+                    keep[j] = False
+                    continue
+
+                first_score = self._to_float(first.get("score"), 0.0)
+                second_score = self._to_float(second.get("score"), 0.0)
+                if first_score >= second_score:
+                    keep[j] = False
+                else:
+                    keep[i] = False
+                    break
+
+        return [table for table, should_keep in zip(tables, keep) if should_keep]
+
     def _dedupe_bboxes(self, bboxes: List[BBox]) -> List[BBox]:
         kept: List[BBox] = []
         for bbox in bboxes:
@@ -532,15 +841,18 @@ class TableLayoutService:
         return kept
 
     def _bbox_iou(self, first: BBox, second: BBox) -> float:
-        x1 = max(first[0], second[0])
-        y1 = max(first[1], second[1])
-        x2 = min(first[2], second[2])
-        y2 = min(first[3], second[3])
-        intersection = self._bbox_area((x1, y1, x2, y2))
+        intersection = self._bbox_intersection(first, second)
         union = self._bbox_area(first) + self._bbox_area(second) - intersection
         if union <= 0:
             return 0.0
         return intersection / union
+
+    def _bbox_intersection(self, first: BBox, second: BBox) -> int:
+        x1 = max(first[0], second[0])
+        y1 = max(first[1], second[1])
+        x2 = min(first[2], second[2])
+        y2 = min(first[3], second[3])
+        return self._bbox_area((x1, y1, x2, y2))
 
     def _clip_bbox(self, coordinate: Any, image_size: Tuple[int, int], padding: int) -> Optional[BBox]:
         rect = self._coordinate_to_rect(coordinate)
@@ -569,6 +881,19 @@ class TableLayoutService:
         left, right = sorted((x1, x2))
         top, bottom = sorted((y1, y2))
         return left, top, right, bottom
+
+    def _ratio_bbox(self, ratios: Tuple[float, float, float, float], image_size: Tuple[int, int]) -> BBox:
+        image_width, image_height = image_size
+        x1, y1, x2, y2 = ratios
+        return self._clip_absolute_bbox(
+            (
+                int(image_width * x1),
+                int(image_height * y1),
+                int(image_width * x2),
+                int(image_height * y2),
+            ),
+            image_size,
+        )
 
     def _coordinate_to_rect(self, coordinate: Any) -> Optional[Tuple[float, float, float, float]]:
         if isinstance(coordinate, (str, bytes)):

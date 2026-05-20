@@ -1,0 +1,212 @@
+{
+  "task_id": "f51053ad71ba",
+  "filename": "03.276-1_A1V（V-182108）.pdf",
+  "pdf_path": "data\\samples\\pdf\\03.276-1_A1V（V-182108）.pdf",
+  "render_scale": 2.0,
+  "score_threshold": 0.45,
+  "crop_padding": 16,
+  "refine_padding": 8,
+  "enable_line_fallback": false,
+  "total_pages": 1,
+  "total_tables": 8,
+  "page_images": [
+    {
+      "page": 1,
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\f51053ad71ba\\page_001.png",
+      "width": 3368,
+      "height": 4768,
+      "pdf_width": 1684.0,
+      "pdf_height": 2384.0,
+      "render_scale": 2.0
+    }
+  ],
+  "tables": [
+    {
+      "label": "table_split",
+      "score": 0.6128767132759094,
+      "bbox": [
+        2278,
+        17,
+        3301,
+        2648
+      ],
+      "model_bbox": [
+        2278,
+        5,
+        3332,
+        4730
+      ],
+      "padded_bbox": [
+        2278,
+        5,
+        3332,
+        4730
+      ],
+      "refine_method": "container_split",
+      "width": 1023,
+      "height": 2631,
+      "page": 1,
+      "table_index": 1,
+      "table_id": "p001_t001",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\f51053ad71ba\\page_001_table_001.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\f51053ad71ba\\page_001.png"
+    },
+    {
+      "label": "table_split",
+      "score": 0.6128767132759094,
+      "bbox": [
+        2278,
+        2939,
+        3301,
+        4695
+      ],
+      "model_bbox": [
+        2278,
+        5,
+        3332,
+        4730
+      ],
+      "padded_bbox": [
+        2278,
+        5,
+        3332,
+        4730
+      ],
+      "refine_method": "container_split",
+      "width": 1023,
+      "height": 1756,
+      "page": 1,
+      "table_index": 2,
+      "table_id": "p001_t002",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\f51053ad71ba\\page_001_table_002.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\f51053ad71ba\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        227,
+        311,
+        681,
+        2035
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 454,
+      "height": 1724,
+      "page": 1,
+      "table_index": 3,
+      "table_id": "p001_t003",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\f51053ad71ba\\page_001_table_003.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\f51053ad71ba\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        254,
+        2376,
+        1705,
+        2534
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 1451,
+      "height": 158,
+      "page": 1,
+      "table_index": 4,
+      "table_id": "p001_t004",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\f51053ad71ba\\page_001_table_004.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\f51053ad71ba\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        254,
+        2049,
+        681,
+        2534
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 427,
+      "height": 485,
+      "page": 1,
+      "table_index": 5,
+      "table_id": "p001_t005",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\f51053ad71ba\\page_001_table_005.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\f51053ad71ba\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        254,
+        4316,
+        681,
+        4680
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 427,
+      "height": 364,
+      "page": 1,
+      "table_index": 6,
+      "table_id": "p001_t006",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\f51053ad71ba\\page_001_table_006.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\f51053ad71ba\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        1945,
+        1076,
+        2126,
+        1736
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 181,
+      "height": 660,
+      "page": 1,
+      "table_index": 7,
+      "table_id": "p001_t007",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\f51053ad71ba\\page_001_table_007.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\f51053ad71ba\\page_001.png"
+    },
+    {
+      "label": "edge_table_candidate",
+      "score": 0.0,
+      "bbox": [
+        1945,
+        433,
+        2109,
+        821
+      ],
+      "model_bbox": null,
+      "padded_bbox": null,
+      "refine_method": "edge_grid",
+      "width": 164,
+      "height": 388,
+      "page": 1,
+      "table_index": 8,
+      "table_id": "p001_t008",
+      "image_path": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\table_blocks\\f51053ad71ba\\page_001_table_008.png",
+      "source_page_image": "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\artifacts\\page_images\\f51053ad71ba\\page_001.png"
+    }
+  ],
+  "overlay_images": [
+    "drawing-standard-poc\\backend\\tmp\\table_crop_debug_edge_v2\\overlays\\03.276-1_A1V（V-182108）_page_001_overlay.png"
+  ],
+  "legend": {
+    "orange_box": "Paddle/LayoutDetection 原始模型框",
+    "red_box": "最终裁剪框，优先使用表格线精裁结果"
+  }
+}
