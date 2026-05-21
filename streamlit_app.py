@@ -443,8 +443,146 @@ def normalize_backend_result(payload: dict[str, Any]) -> tuple[dict[str, Any], d
 def build_initial_session_data() -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     details = [normalize_task_detail(task) for task in load_mock_tasks()]
     task_details = {detail["task_id"]: detail for detail in details}
-    tasks = [normalize_task_summary(detail) for detail in details]
+    tasks = sort_task_summaries([normalize_task_summary(detail) for detail in details])
     return tasks, task_details
+
+
+def parse_created_at(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return datetime.min
+
+
+def sort_task_summaries(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(tasks, key=lambda task: parse_created_at(task["created_at"]), reverse=True)
+
+
+def upsert_task_summary(summary: dict[str, Any]) -> None:
+    tasks = [
+        task for task in st.session_state.tasks if task["task_id"] != summary["task_id"]
+    ]
+    tasks.insert(0, summary)
+    st.session_state.tasks = sort_task_summaries(tasks)
+
+
+def generate_demo_completion_detail(task: dict[str, Any]) -> dict[str, Any]:
+    """Create customer-demo recognition results for a queued POC task."""
+    file_names = task["file_names"]
+    disciplines = ["工艺", "管道", "设备", "仪表", "电气"]
+    standard_candidates = [
+        ("GB/T 150.1-2024", "GB/T 150.1-2024 压力容器 第1部分"),
+        ("SH/T 3059-2023", "SH/T 3059-2023 石油化工管道设计"),
+        ("NB/T 47013-2025", "NB/T 47013-2025 承压设备无损检测"),
+        ("HG/T 20580-2024", "HG/T 20580-2024 钢制化工容器设计基础规定"),
+    ]
+
+    pdfs: list[dict[str, Any]] = []
+    tables: list[dict[str, Any]] = []
+    standards: list[dict[str, Any]] = []
+
+    for pdf_index, file_name in enumerate(file_names, start=1):
+        discipline = disciplines[(pdf_index - 1) % len(disciplines)]
+        drawing_no = f"NJPC-DEMO-{pdf_index:03d}"
+        pdfs.append(
+            {
+                "pdf_name": file_name,
+                "status": "识别成功",
+                "project_name": "南京石化",
+                "unit_name": "炼化一体化装置",
+                "equipment_name": f"演示设备 {pdf_index:02d}",
+                "drawing_no": drawing_no,
+                "discipline": discipline,
+                "design_stage": "施工图",
+                "table_count": 2,
+                "standard_count": 1,
+                "issue_count": 0,
+            }
+        )
+
+        base_table_index = (pdf_index - 1) * 2
+        tables.extend(
+            [
+                {
+                    "pdf_name": file_name,
+                    "page": 1,
+                    "table_index": base_table_index + 1,
+                    "label": "图签信息表",
+                    "score": 0.96,
+                    "bbox": [72, 608, 540, 764],
+                    "image_path": f"demo_outputs/{task['task_id']}/page_001_table_{base_table_index + 1:03d}.png",
+                },
+                {
+                    "pdf_name": file_name,
+                    "page": 1,
+                    "table_index": base_table_index + 2,
+                    "label": "标准引用表",
+                    "score": 0.93,
+                    "bbox": [80, 438, 532, 590],
+                    "image_path": f"demo_outputs/{task['task_id']}/page_001_table_{base_table_index + 2:03d}.png",
+                },
+            ]
+        )
+
+        standard_no, matched_standard = standard_candidates[
+            (pdf_index - 1) % len(standard_candidates)
+        ]
+        standards.append(
+            {
+                "pdf_name": file_name,
+                "standard_no": standard_no,
+                "matched_standard": matched_standard,
+                "status": "通过",
+                "result_type": "标准匹配",
+                "source_table": "标准引用表",
+                "confidence": 0.94,
+                "suggestion": "标准号匹配，建议进入人工抽检。",
+            }
+        )
+
+    completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    completed_detail = {
+        **task,
+        "status": "已完成",
+        "processed_count": len(file_names),
+        "pdf_count": len(file_names),
+        "table_count": len(tables),
+        "standard_count": len(standards),
+        "review_count": 0,
+        "pdfs": pdfs,
+        "tables": tables,
+        "standards": standards,
+        "raw_json": {
+            "source": "poc_demo_completion",
+            "task_id": task["task_id"],
+            "status": "已完成",
+            "completed_at": completed_at,
+            "total_pdfs": len(file_names),
+            "processed_count": len(file_names),
+            "total_tables": len(tables),
+            "total_standards": len(standards),
+            "review_count": 0,
+            "pdfs": pdfs,
+            "tables": tables,
+            "standards": standards,
+        },
+    }
+    return completed_detail
+
+
+def complete_task_for_demo(task_id: str) -> None:
+    detail = st.session_state.task_details.get(task_id)
+    if not detail:
+        return
+    completed_detail = generate_demo_completion_detail(detail)
+    st.session_state.task_details[task_id] = completed_detail
+    upsert_task_summary(normalize_task_summary(completed_detail))
+    st.session_state.selected_task_id = task_id
+
+
+def go_to_page(page: str) -> None:
+    st.session_state.pending_page = page
+    st.rerun()
 
 
 def initialize_state() -> None:
@@ -470,10 +608,16 @@ def initialize_state() -> None:
             normalize_task_summary(detail)
             for detail in st.session_state.task_details.values()
         ]
+    st.session_state.tasks = sort_task_summaries(st.session_state.tasks)
     if "selected_task_id" not in st.session_state:
         st.session_state.selected_task_id = st.session_state.tasks[0]["task_id"]
     if "created_task_id" not in st.session_state:
         st.session_state.created_task_id = None
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "总览工作台"
+    if "pending_page" in st.session_state:
+        st.session_state.current_page = st.session_state.pending_page
+        del st.session_state.pending_page
 
 
 def format_file_size(size: int) -> str:
@@ -584,10 +728,11 @@ def apply_page_style() -> None:
         }
         .status-pill {
             display: inline-block;
-            padding: 0.2rem 0.55rem;
+            padding: 0.28rem 0.68rem;
             border-radius: 999px;
             font-size: 0.82rem;
             font-weight: 600;
+            margin-bottom: 0.35rem;
         }
         .status-success {
             color: #15803d;
@@ -605,6 +750,20 @@ def apply_page_style() -> None:
             color: #b91c1c;
             background: #fee2e2;
         }
+        div[data-testid="stFormSubmitButton"] button[kind="primary"],
+        .stButton button[kind="primary"],
+        button[data-testid="stBaseButton-primary"] {
+            background: #1d4ed8;
+            border-color: #1d4ed8;
+            color: #ffffff;
+        }
+        div[data-testid="stFormSubmitButton"] button[kind="primary"]:hover,
+        .stButton button[kind="primary"]:hover,
+        button[data-testid="stBaseButton-primary"]:hover {
+            background: #1e40af;
+            border-color: #1e40af;
+            color: #ffffff;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -618,15 +777,15 @@ def status_badge(status: str) -> str:
 
 def render_sidebar() -> str:
     st.sidebar.title("图纸识别系统")
-    st.sidebar.caption("POC 演示前端")
+    st.sidebar.caption("图纸识别 POC 原型")
     page = st.sidebar.radio(
         "导航",
         ["总览工作台", "新上传任务", "结果查看"],
         label_visibility="collapsed",
+        key="current_page",
     )
     st.sidebar.divider()
-    st.sidebar.caption("当前版本仅展示 mock 数据")
-    st.sidebar.caption("未连接后端接口 / 未写入数据库")
+    st.sidebar.caption("演示环境")
     return page
 
 
@@ -742,7 +901,7 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
             "PDF 文件",
             type=["pdf"],
             accept_multiple_files=True,
-            help="支持一次选择多个 PDF。本页面仅做 mock 演示，不会上传到后端。",
+            help="支持一次选择多个 PDF，用于演示任务创建与识别流程。",
         )
 
         if uploaded_files:
@@ -768,18 +927,34 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
         else:
             new_detail = build_uploaded_task(task_name.strip(), description.strip(), uploaded_files)
             new_summary = normalize_task_summary(new_detail)
-            tasks.insert(0, new_summary)
             st.session_state.task_details[new_detail["task_id"]] = new_detail
+            upsert_task_summary(new_summary)
             st.session_state.selected_task_id = new_detail["task_id"]
             st.session_state.created_task_id = new_detail["task_id"]
-            st.success("任务创建成功，本轮已在 session_state 中模拟新增任务。")
+            st.success("任务创建成功，已进入识别队列。")
 
     if st.session_state.created_task_id:
+        created_task_id = st.session_state.created_task_id
+        created_detail = st.session_state.task_details.get(created_task_id)
         st.markdown('<div class="soft-panel">', unsafe_allow_html=True)
         st.write("新任务编号")
-        st.code(st.session_state.created_task_id, language="text")
-        st.info("可进入左侧“结果查看”页面查看任务详情。")
+        st.code(created_task_id, language="text")
+        st.info("可前往结果查看页面查看任务详情。")
         st.markdown("</div>", unsafe_allow_html=True)
+
+        action_cols = st.columns([0.2, 0.2, 0.24, 0.36])
+        if action_cols[0].button("查看任务详情", type="primary", key="go_created_detail"):
+            st.session_state.selected_task_id = created_task_id
+            go_to_page("结果查看")
+        if action_cols[1].button("返回总览工作台", key="go_overview_after_create"):
+            go_to_page("总览工作台")
+        if (
+            created_detail
+            and created_detail["status"] == "处理中"
+            and action_cols[2].button("模拟完成识别", key="complete_created_task")
+        ):
+            complete_task_for_demo(created_task_id)
+            st.success("演示识别已完成，可查看识别结果。")
 
 
 def render_task_header(task: dict[str, Any]) -> None:
@@ -801,7 +976,7 @@ def render_task_header(task: dict[str, Any]) -> None:
 
 def render_result_tabs(task: dict[str, Any]) -> None:
     drawing_tab, table_tab, standard_tab, raw_json_tab = st.tabs(
-        ["图纸识别结果", "表格解析结果", "标准提取比对结果", "原始 JSON"]
+        ["图纸识别结果", "表格解析结果", "标准提取比对结果", "技术调试信息"]
     )
 
     with drawing_tab:
@@ -835,7 +1010,7 @@ def render_result_tabs(task: dict[str, Any]) -> None:
         if rows:
             st.dataframe(rows, width="stretch", hide_index=True)
         else:
-            st.info("当前 mock 任务尚未生成表格解析结果。")
+            st.info("当前任务尚未生成表格解析结果。")
 
     with standard_tab:
         rows = [
@@ -853,7 +1028,7 @@ def render_result_tabs(task: dict[str, Any]) -> None:
         if rows:
             st.dataframe(rows, width="stretch", hide_index=True)
         else:
-            st.info("当前 mock 任务尚未生成标准提取比对结果。")
+            st.info("当前任务尚未生成标准提取比对结果。")
 
     with raw_json_tab:
         st.json(task.get("raw_json", {}))
@@ -866,7 +1041,7 @@ def render_results(
     st.title("图纸识别系统 / 结果查看")
     st.markdown('<p class="section-note">查看历史任务与单个任务的识别详情</p>', unsafe_allow_html=True)
 
-    with st.expander("历史任务列表", expanded=True):
+    with st.expander("历史任务列表", expanded=False):
         st.dataframe(task_summary_rows(tasks), width="stretch", hide_index=True)
 
     task_options = {f"{task['task_id']}｜{task['task_name']}": task["task_id"] for task in tasks}
@@ -882,6 +1057,16 @@ def render_results(
     )
     st.session_state.selected_task_id = task_options[selected_label]
     task = task_details[st.session_state.selected_task_id]
+
+    completion_message = st.session_state.pop("demo_completion_message", None)
+    if completion_message:
+        st.success(completion_message)
+
+    if task["status"] == "处理中":
+        if st.button("模拟完成识别", type="primary", key=f"complete_result_{task['task_id']}"):
+            complete_task_for_demo(task["task_id"])
+            st.session_state.demo_completion_message = "演示识别已完成，可查看识别结果。"
+            st.rerun()
 
     render_task_header(task)
     st.divider()
