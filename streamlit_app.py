@@ -271,9 +271,205 @@ def load_mock_tasks() -> list[dict[str, Any]]:
     ]
 
 
+BACKEND_RESULT_CONTRACT = """
+Future OCR backend response contract:
+{
+  "code": 200,
+  "msg": "识别完成",
+  "data": {
+    "task_id": "...",
+    "task_name": "...",
+    "description": "...",
+    "total_pdfs": 3,
+    "processed_count": 3,
+    "total_tables": 8,
+    "total_standards": 12,
+    "review_count": 2,
+    "status": "已完成",
+    "created_at": "2026-05-21 10:30:45",
+    "pdfs": [],
+    "tables": [],
+    "standards": []
+  }
+}
+
+The normalize_backend_result(payload) adapter below converts this payload into the
+front-end's stable session_state structures: task summary + task detail.
+"""
+
+
+def _raw_json_without_nested_raw(source: dict[str, Any]) -> dict[str, Any]:
+    raw_json = deepcopy(source)
+    raw_json.pop("raw_json", None)
+    return raw_json
+
+
+def normalize_table(table: dict[str, Any], fallback_index: int) -> dict[str, Any]:
+    return {
+        "pdf_name": table.get("pdf_name") or table.get("source_pdf") or table.get("pdf_file") or "",
+        "page": table.get("page", 1),
+        "table_index": table.get("table_index") or table.get("index") or fallback_index,
+        "label": table.get("label") or table.get("table_type") or "未分类表格",
+        "score": table.get("score", table.get("confidence", 0.0)),
+        "bbox": table.get("bbox", []),
+        "image_path": table.get("image_path") or table.get("crop_path") or "",
+    }
+
+
+def normalize_standard(standard: dict[str, Any]) -> dict[str, Any]:
+    status = standard.get("status") or standard.get("conclusion") or "待识别"
+    return {
+        "pdf_name": standard.get("pdf_name") or standard.get("pdf_file") or "",
+        "standard_no": standard.get("standard_no") or "",
+        "matched_standard": standard.get("matched_standard") or standard.get("library_match") or "未匹配",
+        "status": status,
+        "result_type": standard.get("result_type") or status,
+        "source_table": standard.get("source_table") or "",
+        "confidence": standard.get("confidence", 1.0 if status == "通过" else 0.0),
+        "suggestion": standard.get("suggestion") or "",
+    }
+
+
+def normalize_pdf(
+    pdf: dict[str, Any],
+    tables: list[dict[str, Any]],
+    standards: list[dict[str, Any]],
+) -> dict[str, Any]:
+    pdf_name = pdf.get("pdf_name") or pdf.get("file_name") or pdf.get("name") or ""
+    pdf_tables = [table for table in tables if table["pdf_name"] == pdf_name]
+    pdf_standards = [standard for standard in standards if standard["pdf_name"] == pdf_name]
+    standard_issues = sum(
+        1 for standard in pdf_standards if standard["status"] in {"待复核", "异常", "失败"}
+    )
+    pdf_issue = 1 if pdf.get("status") in {"待复核", "异常", "失败"} else 0
+    return {
+        "pdf_name": pdf_name,
+        "status": pdf.get("status") or "排队中",
+        "project_name": pdf.get("project_name") or "",
+        "unit_name": pdf.get("unit_name") or "",
+        "equipment_name": pdf.get("equipment_name") or pdf.get("equipment") or "",
+        "drawing_no": pdf.get("drawing_no") or "",
+        "discipline": pdf.get("discipline") or "",
+        "design_stage": pdf.get("design_stage") or pdf.get("stage") or "",
+        "table_count": pdf.get("table_count", len(pdf_tables)),
+        "standard_count": pdf.get("standard_count", len(pdf_standards)),
+        "issue_count": pdf.get("issue_count", pdf_issue + standard_issues),
+    }
+
+
+def normalize_task_detail(source: dict[str, Any]) -> dict[str, Any]:
+    data = source.get("data", source)
+    raw_tables = data.get("tables", [])
+    raw_standards = data.get("standards", [])
+    tables = [normalize_table(table, index) for index, table in enumerate(raw_tables, start=1)]
+    standards = [normalize_standard(standard) for standard in raw_standards]
+
+    raw_pdfs = data.get("pdfs", [])
+    file_names = data.get("file_names") or [
+        pdf.get("pdf_name") or pdf.get("file_name") or pdf.get("name") or ""
+        for pdf in raw_pdfs
+    ]
+    if not raw_pdfs and file_names:
+        raw_pdfs = [{"pdf_name": file_name, "status": "排队中"} for file_name in file_names]
+
+    pdfs = [normalize_pdf(pdf, tables, standards) for pdf in raw_pdfs]
+    normalized_file_names = file_names or [pdf["pdf_name"] for pdf in pdfs]
+    task_id = data.get("task_id") or f"TASK-{datetime.now():%Y%m%d}-{uuid4().hex[:4].upper()}"
+
+    return {
+        "task_id": task_id,
+        "task_name": data.get("task_name") or "未命名识别任务",
+        "description": data.get("description") or "",
+        "file_names": normalized_file_names,
+        "pdfs": pdfs,
+        "tables": tables,
+        "standards": standards,
+        "raw_json": data.get("raw_json") or _raw_json_without_nested_raw(source),
+        "status": data.get("status") or "处理中",
+        "created_at": data.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "processed_count": data.get("processed_count"),
+        "pdf_count": data.get("pdf_count", data.get("total_pdfs")),
+        "table_count": data.get("table_count", data.get("total_tables")),
+        "standard_count": data.get("standard_count", data.get("total_standards")),
+        "review_count": data.get("review_count"),
+    }
+
+
+def count_detail_reviews(detail: dict[str, Any]) -> int:
+    if detail.get("review_count") is not None:
+        return detail["review_count"]
+    pdf_reviews = sum(1 for pdf in detail["pdfs"] if pdf["issue_count"] > 0)
+    standard_reviews = sum(
+        1 for standard in detail["standards"] if standard["status"] in {"待复核", "异常", "失败"}
+    )
+    return max(pdf_reviews, standard_reviews)
+
+
+def normalize_task_summary(detail: dict[str, Any]) -> dict[str, Any]:
+    processed_count = detail.get("processed_count")
+    if processed_count is None:
+        processed_count = sum(1 for pdf in detail["pdfs"] if pdf["status"] == "识别成功")
+    return {
+        "task_id": detail["task_id"],
+        "task_name": detail["task_name"],
+        "description": detail["description"],
+        "pdf_count": detail.get("pdf_count") or len(detail["pdfs"]),
+        "processed_count": processed_count,
+        "table_count": detail.get("table_count") if detail.get("table_count") is not None else len(detail["tables"]),
+        "standard_count": detail.get("standard_count")
+        if detail.get("standard_count") is not None
+        else len(detail["standards"]),
+        "review_count": count_detail_reviews(detail),
+        "status": detail["status"],
+        "created_at": detail["created_at"],
+        "file_names": detail["file_names"],
+    }
+
+
+def normalize_backend_result(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Convert a future OCR backend response into Streamlit session_state data.
+
+    Expected backend shape is documented in BACKEND_RESULT_CONTRACT. This adapter
+    does not call any API in the current POC; it only keeps the future integration
+    point explicit. Missing fields are filled with safe defaults so the page
+    rendering code can continue to use the stable summary/detail structures.
+    """
+    data = payload.get("data", payload)
+    detail = normalize_task_detail({"data": data, "raw_response": payload})
+    summary = normalize_task_summary(detail)
+    return summary, detail
+
+
+def build_initial_session_data() -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    details = [normalize_task_detail(task) for task in load_mock_tasks()]
+    task_details = {detail["task_id"]: detail for detail in details}
+    tasks = [normalize_task_summary(detail) for detail in details]
+    return tasks, task_details
+
+
 def initialize_state() -> None:
-    if "tasks" not in st.session_state:
-        st.session_state.tasks = deepcopy(load_mock_tasks())
+    if "tasks" not in st.session_state and "task_details" not in st.session_state:
+        st.session_state.tasks, st.session_state.task_details = build_initial_session_data()
+    elif "task_details" not in st.session_state:
+        legacy_details = [
+            normalize_task_detail(task)
+            for task in st.session_state.tasks
+            if isinstance(task, dict) and "pdfs" in task
+        ]
+        if legacy_details:
+            st.session_state.task_details = {
+                detail["task_id"]: detail for detail in legacy_details
+            }
+            st.session_state.tasks = [
+                normalize_task_summary(detail) for detail in legacy_details
+            ]
+        else:
+            st.session_state.tasks, st.session_state.task_details = build_initial_session_data()
+    elif "tasks" not in st.session_state:
+        st.session_state.tasks = [
+            normalize_task_summary(detail)
+            for detail in st.session_state.task_details.values()
+        ]
     if "selected_task_id" not in st.session_state:
         st.session_state.selected_task_id = st.session_state.tasks[0]["task_id"]
     if "created_task_id" not in st.session_state:
@@ -287,35 +483,51 @@ def format_file_size(size: int) -> str:
 
 
 def get_processed_count(task: dict[str, Any]) -> int:
+    if task.get("processed_count") is not None:
+        return task["processed_count"]
     return sum(1 for pdf in task["pdfs"] if pdf["status"] == "识别成功")
 
 
 def get_review_count(task: dict[str, Any]) -> int:
-    pdf_reviews = sum(1 for pdf in task["pdfs"] if pdf["status"] in {"待复核", "异常", "失败"})
+    if task.get("review_count") is not None:
+        return task["review_count"]
+    pdf_reviews = sum(1 for pdf in task["pdfs"] if pdf["issue_count"] > 0)
     standard_reviews = sum(
-        1 for item in task["standards"] if item["conclusion"] in {"待复核", "异常", "失败"}
+        1 for item in task["standards"] if item["status"] in {"待复核", "异常", "失败"}
     )
     return max(pdf_reviews, standard_reviews)
 
 
 def get_failed_count(task: dict[str, Any]) -> int:
+    if "pdfs" not in task:
+        detail = st.session_state.task_details.get(task["task_id"], {})
+        if not detail:
+            return 0
+        task = detail
     pdf_failed = sum(1 for pdf in task["pdfs"] if pdf["status"] in {"异常", "失败"})
-    standard_failed = sum(1 for item in task["standards"] if item["conclusion"] in {"异常", "失败"})
+    standard_failed = sum(1 for item in task["standards"] if item["status"] in {"异常", "失败"})
     return max(pdf_failed, standard_failed)
 
 
-def calculate_metrics(tasks: list[dict[str, Any]]) -> dict[str, Any]:
+def calculate_metrics(
+    tasks: list[dict[str, Any]],
+    task_details: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
     total_tasks = len(tasks)
     today = datetime.now().strftime("%Y-%m-%d")
     today_uploaded_pdfs = sum(
-        len(task["pdfs"]) for task in tasks if task["created_at"].startswith(today)
+        task["pdf_count"] for task in tasks if task["created_at"].startswith(today)
     )
     processing_tasks = sum(1 for task in tasks if task["status"] == "处理中")
     completed_tasks = sum(1 for task in tasks if task["status"] == "已完成")
     review_count = sum(get_review_count(task) for task in tasks)
     failed_count = sum(get_failed_count(task) for task in tasks)
-    standards = [item for task in tasks for item in task["standards"]]
-    passed = sum(1 for item in standards if item["conclusion"] == "通过")
+    standards = [
+        standard
+        for detail in task_details.values()
+        for standard in detail.get("standards", [])
+    ]
+    passed = sum(1 for item in standards if item["status"] == "通过")
     pass_rate = passed / len(standards) if standards else 0
     return {
         "total_tasks": total_tasks,
@@ -423,9 +635,9 @@ def task_summary_rows(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         {
             "任务编号": task["task_id"],
             "任务名称": task["task_name"],
-            "PDF 数量": len(task["pdfs"]),
-            "已处理数量": get_processed_count(task),
-            "待复核数量": get_review_count(task),
+            "PDF 数量": task["pdf_count"],
+            "已处理数量": task["processed_count"],
+            "待复核数量": task["review_count"],
             "状态": task["status"],
             "创建时间": task["created_at"],
             "操作提示": "进入结果查看页查看详情",
@@ -434,11 +646,14 @@ def task_summary_rows(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def render_overview(tasks: list[dict[str, Any]]) -> None:
+def render_overview(
+    tasks: list[dict[str, Any]],
+    task_details: dict[str, dict[str, Any]],
+) -> None:
     st.title("图纸识别系统 / 总览工作台")
     st.markdown('<p class="section-note">实时掌握识别任务整体情况</p>', unsafe_allow_html=True)
 
-    metrics = calculate_metrics(tasks)
+    metrics = calculate_metrics(tasks, task_details)
     metric_items = [
         ("总任务数", metrics["total_tasks"]),
         ("今日上传 PDF 数", metrics["today_uploaded_pdfs"]),
@@ -469,15 +684,21 @@ def render_overview(tasks: list[dict[str, Any]]) -> None:
 
 def build_uploaded_task(task_name: str, description: str, files: list[Any]) -> dict[str, Any]:
     task_id = f"TASK-{datetime.now():%Y%m%d}-{uuid4().hex[:4].upper()}"
+    file_names = [file.name for file in files]
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     pdfs = [
         {
-            "file_name": file.name,
-            "drawing_no": "",
-            "project_name": "",
-            "equipment": "",
-            "discipline": "",
-            "stage": "",
+            "pdf_name": file.name,
             "status": "排队中",
+            "project_name": "",
+            "unit_name": "",
+            "equipment_name": "",
+            "drawing_no": "",
+            "discipline": "",
+            "design_stage": "",
+            "table_count": 0,
+            "standard_count": 0,
+            "issue_count": 0,
         }
         for file in files
     ]
@@ -485,11 +706,28 @@ def build_uploaded_task(task_name: str, description: str, files: list[Any]) -> d
         "task_id": task_id,
         "task_name": task_name,
         "description": description,
+        "file_names": file_names,
         "status": "处理中",
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "created_at": created_at,
         "pdfs": pdfs,
         "tables": [],
         "standards": [],
+        "raw_json": {
+            "source": "streamlit_mock_upload",
+            "task_id": task_id,
+            "task_name": task_name,
+            "description": description,
+            "created_at": created_at,
+            "file_names": file_names,
+            "files": [
+                {
+                    "file_name": file.name,
+                    "size": file.size,
+                    "upload_status": "已选择，等待识别",
+                }
+                for file in files
+            ],
+        },
     }
 
 
@@ -528,10 +766,12 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
         elif not uploaded_files:
             st.warning("请至少选择一个 PDF 文件。")
         else:
-            new_task = build_uploaded_task(task_name.strip(), description.strip(), uploaded_files)
-            tasks.insert(0, new_task)
-            st.session_state.selected_task_id = new_task["task_id"]
-            st.session_state.created_task_id = new_task["task_id"]
+            new_detail = build_uploaded_task(task_name.strip(), description.strip(), uploaded_files)
+            new_summary = normalize_task_summary(new_detail)
+            tasks.insert(0, new_summary)
+            st.session_state.task_details[new_detail["task_id"]] = new_detail
+            st.session_state.selected_task_id = new_detail["task_id"]
+            st.session_state.created_task_id = new_detail["task_id"]
             st.success("任务创建成功，本轮已在 session_state 中模拟新增任务。")
 
     if st.session_state.created_task_id:
@@ -560,19 +800,19 @@ def render_task_header(task: dict[str, Any]) -> None:
 
 
 def render_result_tabs(task: dict[str, Any]) -> None:
-    drawing_tab, table_tab, standard_tab = st.tabs(
-        ["图纸识别结果", "表格解析结果", "标准提取比对结果"]
+    drawing_tab, table_tab, standard_tab, raw_json_tab = st.tabs(
+        ["图纸识别结果", "表格解析结果", "标准提取比对结果", "原始 JSON"]
     )
 
     with drawing_tab:
         rows = [
             {
-                "PDF 文件": pdf["file_name"],
+                "PDF 文件": pdf["pdf_name"],
                 "图号": pdf["drawing_no"] or "-",
                 "项目名称": pdf["project_name"] or "-",
-                "装置 / 设备": pdf["equipment"] or "-",
+                "装置 / 设备": pdf["equipment_name"] or pdf["unit_name"] or "-",
                 "专业": pdf["discipline"] or "-",
-                "阶段": pdf["stage"] or "-",
+                "阶段": pdf["design_stage"] or "-",
                 "状态": pdf["status"],
             }
             for pdf in task["pdfs"]
@@ -582,12 +822,13 @@ def render_result_tabs(task: dict[str, Any]) -> None:
     with table_tab:
         rows = [
             {
-                "序号": table["index"],
-                "来源 PDF": table["source_pdf"],
-                "表格类型": table["table_type"],
-                "置信度": f"{table['confidence']:.0%}",
+                "序号": table["table_index"],
+                "来源 PDF": table["pdf_name"],
+                "页码": table["page"],
+                "表格类型": table["label"],
+                "置信度": f"{table['score']:.0%}",
                 "bbox": table["bbox"],
-                "裁剪文件路径": table["crop_path"],
+                "裁剪文件路径": table["image_path"],
             }
             for table in task["tables"]
         ]
@@ -599,11 +840,12 @@ def render_result_tabs(task: dict[str, Any]) -> None:
     with standard_tab:
         rows = [
             {
-                "PDF 文件": item["pdf_file"],
+                "PDF 文件": item["pdf_name"],
                 "识别标准号": item["standard_no"] or "-",
-                "标准库匹配": item["library_match"],
-                "结论": item["conclusion"],
+                "标准库匹配": item["matched_standard"],
+                "结论": item["status"],
                 "来源表格": item["source_table"],
+                "置信度": f"{item['confidence']:.0%}",
                 "建议": item["suggestion"],
             }
             for item in task["standards"]
@@ -613,8 +855,14 @@ def render_result_tabs(task: dict[str, Any]) -> None:
         else:
             st.info("当前 mock 任务尚未生成标准提取比对结果。")
 
+    with raw_json_tab:
+        st.json(task.get("raw_json", {}))
 
-def render_results(tasks: list[dict[str, Any]]) -> None:
+
+def render_results(
+    tasks: list[dict[str, Any]],
+    task_details: dict[str, dict[str, Any]],
+) -> None:
     st.title("图纸识别系统 / 结果查看")
     st.markdown('<p class="section-note">查看历史任务与单个任务的识别详情</p>', unsafe_allow_html=True)
 
@@ -633,7 +881,7 @@ def render_results(tasks: list[dict[str, Any]]) -> None:
         index=current_index,
     )
     st.session_state.selected_task_id = task_options[selected_label]
-    task = next(item for item in tasks if item["task_id"] == st.session_state.selected_task_id)
+    task = task_details[st.session_state.selected_task_id]
 
     render_task_header(task)
     st.divider()
@@ -645,14 +893,15 @@ def main() -> None:
     initialize_state()
 
     tasks = st.session_state.tasks
+    task_details = st.session_state.task_details
     page = render_sidebar()
 
     if page == "总览工作台":
-        render_overview(tasks)
+        render_overview(tasks, task_details)
     elif page == "新上传任务":
         render_upload(tasks)
     else:
-        render_results(tasks)
+        render_results(tasks, task_details)
 
 
 if __name__ == "__main__":
