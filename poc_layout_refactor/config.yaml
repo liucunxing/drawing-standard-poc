@@ -18,6 +18,9 @@ keep_image_in_right_column: true
 margin_table: 0.05
 margin_text: 0.08
 margin_roi: 0.05
+precise_table_threshold: 0.5
+precise_table_margin: 0.02
+precise_table_dedupe_iou_threshold: 0.9
 dedupe_iou_threshold: 0.75
 merge_iou_threshold: 0.18
 merge_vertical_gap_ratio: 0.035

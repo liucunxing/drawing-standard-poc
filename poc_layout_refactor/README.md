@@ -114,6 +114,9 @@ output/{pdf_name}/
 - `roi_{roi_name}_layout_overlay.png`: ROI 局部检测框标注图。
 - `layout_detected_regions.json`: PP-DocLayout 原始检测框对应的高清裁剪清单。
 - `layout_detections/`: 只包含 PP-DocLayout 原始检测框的高清裁剪，不包含固定 ROI 兜底区域。
+- `precise_table_regions.json`: 默认只保留 `table` 且 `score >= 0.5` 的精准表格框，不做相邻合并。
+- `precise_table_regions_overlay.png`: 精准表格框标注图。
+- `precise_tables/`: 精准表格框的高 DPI 裁剪图，适合人工检查表格切分质量。
 - `candidate_regions_raw.json`: 合并前候选区域。
 - `candidate_regions_merged.json`: 合并后的候选区域，统一使用 page_ratio 坐标。
 - `candidate_regions_overlay.png`: 合并候选区域标注图。

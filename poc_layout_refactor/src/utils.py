@@ -297,6 +297,8 @@ def write_debug_report(
         f"- Full page layout JSON: `full_page_layout_raw.json`",
         f"- Full page layout overlay: `full_page_layout_overlay.png`",
         f"- Raw layout detection crops: `layout_detections/`",
+        f"- Precise table JSON: `precise_table_regions.json`",
+        f"- Precise table crops: `precise_tables/`",
         f"- Candidate JSON: `candidate_regions_merged.json`",
         f"- Candidate overlay: `candidate_regions_overlay.png`",
         f"- Candidate crop directory: `candidates/`",

@@ -3,7 +3,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from src.candidate_builder import build_raw_candidates, merge_candidate_regions
+from src.candidate_builder import (
+    build_precise_table_regions,
+    build_raw_candidates,
+    merge_candidate_regions,
+)
 from src.cropper import crop_candidates_from_highdpi, crop_layout_boxes_from_highdpi
 from src.layout_detect import LayoutDetector
 from src.pdf_render import render_pdf_page
@@ -130,6 +134,28 @@ def run_pipeline(pdf_path: str | Path, output_root: str | Path, config_path: str
     write_json(
         run_dir / "layout_detected_regions.json",
         {"coordinate_format": "page_ratio", "regions": layout_crops},
+    )
+
+    precise_tables = build_precise_table_regions(
+        full_layout=full_layout,
+        roi_layouts=roi_layouts,
+        config=config,
+        page_number=page_number,
+    )
+    draw_ratio_boxes(
+        page_info["low_image"]["path"],
+        precise_tables,
+        run_dir / "precise_table_regions_overlay.png",
+        bbox_field="expanded_bbox_ratio",
+    )
+    cropped_precise_tables = crop_candidates_from_highdpi(
+        page_info["high_image"]["path"],
+        precise_tables,
+        run_dir / "precise_tables",
+    )
+    write_json(
+        run_dir / "precise_table_regions.json",
+        {"coordinate_format": "page_ratio", "regions": cropped_precise_tables},
     )
 
     raw_candidates = build_raw_candidates(

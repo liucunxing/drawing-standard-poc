@@ -101,6 +101,103 @@ def merge_candidate_regions(
     return final_candidates
 
 
+def build_precise_table_regions(
+    full_layout: dict[str, Any],
+    roi_layouts: list[dict[str, Any]],
+    config: dict[str, Any],
+    page_number: int = 1,
+) -> list[dict[str, Any]]:
+    threshold = float(config.get("precise_table_threshold", 0.5))
+    margin = float(config.get("precise_table_margin", 0.02))
+    regions: list[dict[str, Any]] = []
+
+    for box in full_layout.get("boxes", []):
+        region = _layout_box_to_precise_table(
+            box=box,
+            source="layout_full",
+            roi_name=None,
+            threshold=threshold,
+            margin=margin,
+            page_number=page_number,
+        )
+        if region:
+            regions.append(region)
+
+    for layout in roi_layouts:
+        roi_name = layout.get("roi_name")
+        for box in layout.get("boxes", []):
+            region = _layout_box_to_precise_table(
+                box=box,
+                source="layout_roi",
+                roi_name=roi_name,
+                threshold=threshold,
+                margin=margin,
+                page_number=page_number,
+            )
+            if region:
+                regions.append(region)
+
+    regions = _dedupe_precise_tables(
+        regions, float(config.get("precise_table_dedupe_iou_threshold", 0.9))
+    )
+    regions = sorted(
+        regions,
+        key=lambda item: (
+            item["bbox_ratio"][1],
+            item["bbox_ratio"][0],
+            -float(item.get("score", 0.0)),
+        ),
+    )
+    for index, item in enumerate(regions, start=1):
+        item["region_id"] = f"page_{page_number}_precise_table_{index:03d}"
+    return regions
+
+
+def _layout_box_to_precise_table(
+    box: dict[str, Any],
+    source: str,
+    roi_name: str | None,
+    threshold: float,
+    margin: float,
+    page_number: int,
+) -> dict[str, Any] | None:
+    label = normalize_label(box.get("label"))
+    score = float(box.get("score", 0.0))
+    if label != "table" or score < threshold:
+        return None
+    bbox_ratio = clamp_bbox_ratio(box["bbox_ratio"])
+    return {
+        "region_id": "",
+        "page": page_number,
+        "source": source,
+        "roi_name": roi_name,
+        "labels": ["table"],
+        "score": round(score, 6),
+        "priority": "high",
+        "bbox_ratio": bbox_ratio,
+        "expanded_bbox_ratio": expand_bbox_ratio(bbox_ratio, margin),
+        "model_box_id": box.get("box_id"),
+    }
+
+
+def _dedupe_precise_tables(
+    regions: list[dict[str, Any]], iou_threshold: float
+) -> list[dict[str, Any]]:
+    kept: list[dict[str, Any]] = []
+    for region in sorted(
+        regions,
+        key=lambda item: (-float(item.get("score", 0.0)), bbox_area(item["bbox_ratio"])),
+    ):
+        duplicate = False
+        for existing in kept:
+            if bbox_iou(region["bbox_ratio"], existing["bbox_ratio"]) >= iou_threshold:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(dict(region))
+    return kept
+
+
 def _layout_box_to_candidate(
     box: dict[str, Any],
     source: str,
