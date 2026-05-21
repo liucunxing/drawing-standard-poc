@@ -1,0 +1,24 @@
+low_dpi: 150
+high_dpi: 400
+layout_threshold: 0.2
+layout_model_name: PP-DocLayout_plus-L
+layout_device: cpu
+layout_enable_mkldnn: false
+layout_enable_cinn: false
+layout_cpu_threads: 4
+layout_nms: true
+layout_merge_bboxes_mode: union
+layout_fallback_on_error: true
+keep_labels:
+  - table
+  - text
+  - aside_text
+  - figure_title
+keep_image_in_right_column: true
+margin_table: 0.05
+margin_text: 0.08
+margin_roi: 0.05
+dedupe_iou_threshold: 0.75
+merge_iou_threshold: 0.18
+merge_vertical_gap_ratio: 0.035
+merge_horizontal_gap_ratio: 0.025
