@@ -20,3 +20,6 @@ venv/
 .idea/
 .vscode/
 *.iml
+
+# 临时文件和输出目录
+backend/tmp/
