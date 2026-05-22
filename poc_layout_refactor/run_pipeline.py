@@ -8,7 +8,7 @@ from src.candidate_builder import (
     build_raw_candidates,
     merge_candidate_regions,
 )
-from src.cropper import crop_candidates_from_highdpi, crop_layout_boxes_from_highdpi
+from src.cropper import crop_candidates_from_highdpi
 from src.layout_detect import LayoutDetector
 from src.pdf_render import render_pdf_page
 from src.roi_builder import build_rois, crop_roi_images
@@ -111,31 +111,6 @@ def run_pipeline(pdf_path: str | Path, output_root: str | Path, config_path: str
             run_dir / f"roi_{roi['name']}_layout_overlay.png",
         )
 
-    layout_crops = []
-    layout_crop_dir = ensure_dir(run_dir / "layout_detections")
-    layout_crops.extend(
-        crop_layout_boxes_from_highdpi(
-            page_info["high_image"]["path"],
-            full_layout,
-            layout_crop_dir,
-            "full_page",
-        )
-    )
-    for layout in roi_layouts:
-        roi_name = layout.get("roi_name") or "roi"
-        layout_crops.extend(
-            crop_layout_boxes_from_highdpi(
-                page_info["high_image"]["path"],
-                layout,
-                layout_crop_dir,
-                f"roi_{roi_name}",
-            )
-        )
-    write_json(
-        run_dir / "layout_detected_regions.json",
-        {"coordinate_format": "page_ratio", "regions": layout_crops},
-    )
-
     precise_tables = build_precise_table_regions(
         full_layout=full_layout,
         roi_layouts=roi_layouts,
@@ -148,14 +123,9 @@ def run_pipeline(pdf_path: str | Path, output_root: str | Path, config_path: str
         run_dir / "precise_table_regions_overlay.png",
         bbox_field="expanded_bbox_ratio",
     )
-    cropped_precise_tables = crop_candidates_from_highdpi(
-        page_info["high_image"]["path"],
-        precise_tables,
-        run_dir / "precise_tables",
-    )
     write_json(
         run_dir / "precise_table_regions.json",
-        {"coordinate_format": "page_ratio", "regions": cropped_precise_tables},
+        {"coordinate_format": "page_ratio", "regions": precise_tables},
     )
 
     raw_candidates = build_raw_candidates(
@@ -170,7 +140,12 @@ def run_pipeline(pdf_path: str | Path, output_root: str | Path, config_path: str
         {"coordinate_format": "page_ratio", "candidates": raw_candidates},
     )
 
-    merged_candidates = merge_candidate_regions(raw_candidates, config)
+    merged_candidates = merge_candidate_regions(
+        raw_candidates,
+        config,
+        rois=roi_images,
+        page_number=page_number,
+    )
     draw_ratio_boxes(
         page_info["low_image"]["path"],
         merged_candidates,
@@ -178,13 +153,18 @@ def run_pipeline(pdf_path: str | Path, output_root: str | Path, config_path: str
         bbox_field="expanded_bbox_ratio",
     )
 
+    merged_candidate_path = run_dir / "candidate_regions_merged.json"
+    write_json(
+        merged_candidate_path,
+        {"coordinate_format": "page_ratio", "candidates": merged_candidates},
+    )
     cropped_candidates = crop_candidates_from_highdpi(
         page_info["high_image"]["path"],
-        merged_candidates,
+        merged_candidate_path,
         run_dir / "candidates",
     )
     write_json(
-        run_dir / "candidate_regions_merged.json",
+        merged_candidate_path,
         {"coordinate_format": "page_ratio", "candidates": cropped_candidates},
     )
 

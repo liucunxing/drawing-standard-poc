@@ -266,6 +266,7 @@ def build_summary(
         "candidates": [
             {
                 "region_id": item["region_id"],
+                "zone": item.get("zone"),
                 "labels": item.get("labels", []),
                 "score": item.get("score"),
                 "priority": item.get("priority"),
@@ -296,17 +297,15 @@ def write_debug_report(
         f"- High DPI image: `page_1_highdpi.png`",
         f"- Full page layout JSON: `full_page_layout_raw.json`",
         f"- Full page layout overlay: `full_page_layout_overlay.png`",
-        f"- Raw layout detection crops: `layout_detections/`",
         f"- Precise table JSON: `precise_table_regions.json`",
-        f"- Precise table crops: `precise_tables/`",
         f"- Candidate JSON: `candidate_regions_merged.json`",
         f"- Candidate overlay: `candidate_regions_overlay.png`",
         f"- Candidate crop directory: `candidates/`",
         "",
         "## Candidate Regions",
         "",
-        "| region_id | priority | labels | score | bbox_ratio | crop |",
-        "| --- | --- | --- | ---: | --- | --- |",
+        "| region_id | zone | priority | labels | score | bbox_ratio | crop |",
+        "| --- | --- | --- | --- | ---: | --- | --- |",
     ]
     for item in candidates:
         labels = ", ".join(item.get("labels", []))
@@ -315,8 +314,9 @@ def write_debug_report(
         crop = item.get("crop_image_path") or ""
         crop_name = Path(crop).name if crop else ""
         lines.append(
-            "| {region_id} | {priority} | {labels} | {score} | `{bbox}` | `{crop}` |".format(
+            "| {region_id} | {zone} | {priority} | {labels} | {score} | `{bbox}` | `{crop}` |".format(
                 region_id=item.get("region_id"),
+                zone=item.get("zone", ""),
                 priority=item.get("priority"),
                 labels=labels,
                 score=score_text,

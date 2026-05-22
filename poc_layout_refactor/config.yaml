@@ -18,6 +18,15 @@ keep_image_in_right_column: true
 margin_table: 0.05
 margin_text: 0.08
 margin_roi: 0.05
+candidate_max_area_ratio: 0.35
+candidate_min_height_ratio: 0.03
+candidate_min_width_ratio: 0.03
+candidate_zone_min_fit_ratio: 0.8
+candidate_zone_iou_threshold: 0.5
+candidate_final_iou_threshold: 0.5
+candidate_merge_horizontal_overlap: 0.45
+candidate_merge_vertical_gap_ratio: 0.035
+candidate_max_count: 8
 precise_table_threshold: 0.5
 precise_table_margin: 0.02
 precise_table_dedupe_iou_threshold: 0.9
