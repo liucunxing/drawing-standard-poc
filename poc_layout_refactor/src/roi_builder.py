@@ -4,23 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .utils import bbox_ratio_to_pixels, clamp_bbox_ratio, ensure_dir
-
-
-PORTRAIT_ROIS: dict[str, list[float]] = {
-    "right_column": [0.58, 0.02, 0.98, 0.95],
-    "right_top": [0.58, 0.02, 0.98, 0.35],
-    "right_middle": [0.58, 0.30, 0.98, 0.65],
-    "right_bottom": [0.58, 0.60, 0.98, 0.98],
-    "bottom_band": [0.05, 0.72, 0.98, 0.98],
-}
-
-LANDSCAPE_ROIS: dict[str, list[float]] = {
-    "right_column": [0.62, 0.02, 0.98, 0.95],
-    "right_top": [0.62, 0.02, 0.98, 0.35],
-    "right_middle": [0.62, 0.30, 0.98, 0.65],
-    "right_bottom": [0.62, 0.60, 0.98, 0.98],
-    "bottom_band": [0.05, 0.70, 0.98, 0.98],
-}
+from .zone_config import get_roi_definitions, load_zones_config
 
 
 def build_rois(
@@ -28,13 +12,14 @@ def build_rois(
     page_height_px: int,
     page_number: int = 1,
     orientation: str | None = None,
+    zones_config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    """Build ROI dicts from ``config/zones.yaml`` for the resolved orientation."""
     resolved_orientation = orientation or (
         "landscape" if page_width_px >= page_height_px else "portrait"
     )
-    definitions = (
-        LANDSCAPE_ROIS if resolved_orientation == "landscape" else PORTRAIT_ROIS
-    )
+    config = zones_config or load_zones_config()
+    definitions = get_roi_definitions(config, resolved_orientation)
     rois: list[dict[str, Any]] = []
     for name, bbox in definitions.items():
         bbox_ratio = clamp_bbox_ratio(bbox)

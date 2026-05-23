@@ -13,7 +13,18 @@ LABEL_COLORS: dict[str, tuple[int, int, int]] = {
     "figure_title": (42, 157, 143),
     "image": (133, 133, 133),
     "fixed_roi": (225, 162, 38),
+    "roi_fallback": (225, 162, 38),
     "merged": (219, 70, 108),
+    "layout_box": (47, 122, 198),
+}
+
+
+SOURCE_COLORS: dict[str, tuple[int, int, int]] = {
+    "roi_fallback": (225, 162, 38),
+    "merged": (219, 70, 108),
+    "layout_box": (47, 122, 198),
+    "full_page": (47, 122, 198),
+    "roi": (96, 132, 196),
 }
 
 
@@ -96,7 +107,11 @@ def _item_label(item: dict[str, Any], title_field: str | None) -> str:
         base = str(item[title_field])
     elif item.get("region_id"):
         labels = ",".join(item.get("labels", []))
-        base = f"{item['region_id']}:{labels}"
+        source = item.get("source")
+        suffix = f"[{source}]" if source else ""
+        base = f"{item['region_id']}:{labels}{suffix}"
+    elif item.get("raw_id"):
+        base = f"{item['raw_id']}:{item.get('label', '')}"
     elif item.get("labels"):
         base = ",".join(item["labels"])
     else:
@@ -109,9 +124,10 @@ def _item_label(item: dict[str, Any], title_field: str | None) -> str:
 
 
 def _item_color(item: dict[str, Any]) -> tuple[int, int, int]:
+    source = item.get("source")
+    if source in SOURCE_COLORS:
+        return SOURCE_COLORS[source]
     labels = item.get("labels") or [item.get("label")]
-    if item.get("source") == "fixed_roi":
-        return LABEL_COLORS["fixed_roi"]
     for label in labels:
         if label in LABEL_COLORS:
             return LABEL_COLORS[label]

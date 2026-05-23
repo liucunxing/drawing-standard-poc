@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+# DEPRECATED: Current Phase 1 layout POC is under poc_layout_refactor.
+# Do not add new Stage 1 features here. New layout / candidate / cropping
+# logic must live in `poc_layout_refactor/src/` so that there is a single
+# source of truth for the standard-information identification pipeline.
+
 import json
 import math
 import re

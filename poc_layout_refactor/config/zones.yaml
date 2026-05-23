@@ -1,0 +1,89 @@
+# Phase 1 layout governance configuration.
+#
+# All coordinates are page_ratio [x1, y1, x2, y2] with origin at top-left.
+# This file is the single source of truth for ROI definitions, candidate
+# filtering thresholds, conservative merging behaviour, and invalid regions
+# that must never be emitted as candidates.
+
+portrait:
+  roi_definitions:
+    right_column: [0.58, 0.02, 0.98, 0.95]
+    right_top: [0.58, 0.02, 0.98, 0.35]
+    right_middle: [0.58, 0.30, 0.98, 0.65]
+    right_bottom: [0.58, 0.60, 0.98, 0.98]
+    bottom_band: [0.05, 0.72, 0.98, 0.98]
+
+landscape:
+  roi_definitions:
+    right_column: [0.62, 0.02, 0.98, 0.95]
+    right_top: [0.62, 0.02, 0.98, 0.35]
+    right_middle: [0.62, 0.30, 0.98, 0.65]
+    right_bottom: [0.62, 0.60, 0.98, 0.98]
+    bottom_band: [0.05, 0.70, 0.98, 0.98]
+
+candidate:
+  # Conservative is the default per Phase 1 review: only merge nearly-identical
+  # boxes (high IoU, same label). Other strategies are available for testing:
+  #   - none:         never merge, return raw candidates as-is (after dedupe).
+  #   - conservative: merge only when IoU >= merge_iou_threshold AND same label.
+  #   - union:        legacy behaviour, merge by horizontal_overlap + vertical_gap.
+  merge_strategy: conservative
+  merge_iou_threshold: 0.85
+  # Final near-duplicate removal applied after merging. Set very high so that
+  # we keep boxes that overlap but are not nearly identical (the OCR layer
+  # can deduplicate later using extracted text).
+  dedupe_iou_threshold: 0.95
+
+  keep_labels:
+    - table
+    - text
+    - aside_text
+    - figure_title
+  # Labels that must never become a candidate (e.g. page numbers).
+  filter_labels:
+    - number
+  # If True, also keep `image` boxes when they lie inside the right_column ROI
+  # (drawings frequently use figure_title/image to host part of the title block).
+  keep_image_in_right_column: true
+
+  margin:
+    table: 0.05
+    text: 0.08
+    figure_title: 0.05
+    roi_fallback: 0.03
+    default: 0.03
+
+  size_filter:
+    # Phase 1 deliberately uses generous bounds: we would rather crop a whole
+    # page than silently drop the only region carrying the standard number.
+    min_width_ratio: 0.02
+    min_height_ratio: 0.02
+    max_area_ratio: 0.92
+
+invalid_regions:
+  # Pure coordinate axis row at the very top of A1 drawings.
+  top_axis:
+    bbox: [0.0, 0.0, 1.0, 0.035]
+    reason: top_axis_region
+  # Left-side coordinate column / logo / drafting frame.
+  left_logo:
+    bbox: [0.0, 0.0, 0.04, 1.0]
+    reason: left_logo_region
+  # Bottom coordinate axis row.
+  bottom_axis:
+    bbox: [0.0, 0.965, 1.0, 1.0]
+    reason: bottom_axis_region
+  # Right-side coordinate axis column.
+  right_axis:
+    bbox: [0.985, 0.0, 1.0, 1.0]
+    reason: right_axis_region
+
+# Catalog of ROI fallback candidates to always emit, regardless of detection.
+# Each entry references an ROI name from the portrait/landscape blocks.
+roi_fallback:
+  always_emit:
+    - right_column
+    - right_top
+    - right_middle
+    - right_bottom
+    - bottom_band
