@@ -1,5 +1,7 @@
 low_dpi: 150
-high_dpi: 400
+high_dpi: 300
+render_reuse_existing: true
+render_force: false
 layout_threshold: 0.2
 layout_model_name: PP-DocLayout_plus-L
 layout_device: cpu

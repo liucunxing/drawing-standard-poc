@@ -33,6 +33,10 @@ from src.candidate_phase1 import (
     finalise_candidates,
     merge_candidates,
 )
+from src.candidate_builder import (
+    build_raw_candidates as build_zone_raw_candidates,
+    merge_candidate_regions as merge_zone_candidate_regions,
+)
 from src.cropper import crop_candidates_from_highdpi
 from src.drop_tracker import DropTracker
 from src.layout_detect import LayoutDetector
@@ -131,7 +135,9 @@ def run_pipeline(
         output_dir=run_dir,
         page_number=page_number,
         low_dpi=int(config.get("low_dpi", 150)),
-        high_dpi=int(config.get("high_dpi", 400)),
+        high_dpi=int(config.get("high_dpi", 300)),
+        reuse_existing=bool(config.get("render_reuse_existing", True)),
+        force_render=bool(config.get("render_force", False)),
     )
     page_info["zones_config_path"] = zones_config.get("source_path")
     write_json(run_dir / "page_info.json", page_info)
@@ -228,10 +234,22 @@ def run_pipeline(
         },
     )
 
-    # 7. Conservative merge + dedupe + finalise.
-    merged = merge_candidates(all_raw_candidates, zones_config, drop_tracker)
-    deduped = dedupe_candidates(merged, zones_config, drop_tracker)
-    final_candidates = finalise_candidates(deduped, page_number=page_number)
+    # 7. Build final candidates by business zone. The broad Phase-1 raw
+    # candidates above remain as audit/debug artefacts; final crops should be a
+    # small, stable set of business regions.
+    zone_raw_candidates = build_zone_raw_candidates(
+        full_layout=full_layout,
+        roi_layouts=roi_layouts,
+        rois=roi_images,
+        config=config,
+        page_number=page_number,
+    )
+    final_candidates = merge_zone_candidate_regions(
+        zone_raw_candidates,
+        config,
+        rois=roi_images,
+        page_number=page_number,
+    )
 
     merged_path = run_dir / "candidate_regions_merged.json"
     write_json(
@@ -239,9 +257,7 @@ def run_pipeline(
         {
             "coordinate_format": "page_ratio",
             "page": page_number,
-            "merge_strategy": str(
-                (zones_config.get("candidate") or {}).get("merge_strategy", "conservative")
-            ),
+            "merge_strategy": "zone_business",
             "count": len(final_candidates),
             "candidates": final_candidates,
         },
@@ -264,9 +280,7 @@ def run_pipeline(
         {
             "coordinate_format": "page_ratio",
             "page": page_number,
-            "merge_strategy": str(
-                (zones_config.get("candidate") or {}).get("merge_strategy", "conservative")
-            ),
+            "merge_strategy": "zone_business",
             "count": len(cropped_candidates),
             "candidates": cropped_candidates,
         },
@@ -293,9 +307,7 @@ def run_pipeline(
         candidate_raw=all_raw_candidates,
         candidate_merged=cropped_candidates,
         dropped=drop_tracker.entries,
-        merge_strategy=str(
-            (zones_config.get("candidate") or {}).get("merge_strategy", "conservative")
-        ),
+        merge_strategy="zone_business",
         zones_config_path=zones_config.get("source_path", ""),
         output_files=output_files,
     )

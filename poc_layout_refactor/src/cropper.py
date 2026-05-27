@@ -46,6 +46,7 @@ def crop_candidates_from_highdpi(
             "Pillow is required to crop candidate images. Install dependencies with "
             "`pip install -r requirements.txt` inside poc_layout_refactor."
         ) from exc
+    Image.MAX_IMAGE_PIXELS = None
 
     payload = json.loads(Path(merged_candidate_json_path).read_text(encoding="utf-8"))
     candidates = payload.get("candidates")
@@ -75,6 +76,7 @@ def crop_candidates_from_highdpi(
             crop.save(crop_path)
 
             updated = dict(candidate)
+            updated["candidate_index"] = int(updated.get("candidate_index") or idx)
             updated["crop_image_path"] = str(crop_path)
             updated["crop_bbox_px_highdpi"] = list(bbox_px)
             updated["crop_width_px"] = crop.width
