@@ -35,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
         engine_name=engine_name,
         structeqtable_ckpt=args.structeqtable_ckpt,
         structeqtable_output_formats=args.structeqtable_output_formats,
+        structeqtable_flash_attn=args.structeqtable_flash_attn,
+        structeqtable_max_new_tokens=args.structeqtable_max_new_tokens,
+        structeqtable_max_time=args.structeqtable_max_time,
     )
     writer = TableRecognitionOutputWriter(load_result.input_dir, engine_name)
 
@@ -106,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Optional StructEqTable checkpoint path or Hugging Face model id. "
             "If omitted, the adapter checks STRUCT_EQTABLE_CKPT_PATH and then "
-            "records engine_unavailable instead of downloading/loading a model."
+            "uses U4R/StructTable-InternVL2-1B."
         ),
     )
     parser.add_argument(
@@ -117,6 +120,27 @@ def build_parser() -> argparse.ArgumentParser:
             "Can also be set with STRUCT_EQTABLE_OUTPUT_FORMATS."
         ),
     )
+    parser.add_argument(
+        "--structeqtable-flash-attn",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable flash attention for StructEqTable. Default is disabled for "
+            "local Windows compatibility; STRUCT_EQTABLE_FLASH_ATTN=true also enables it."
+        ),
+    )
+    parser.add_argument(
+        "--structeqtable-max-new-tokens",
+        type=int,
+        default=1024,
+        help="Maximum new tokens for StructEqTable generation.",
+    )
+    parser.add_argument(
+        "--structeqtable-max-time",
+        type=int,
+        default=30,
+        help="Maximum generation time in seconds for StructEqTable.",
+    )
     return parser
 
 
@@ -124,6 +148,9 @@ def build_engine(
     engine_name: str,
     structeqtable_ckpt: str | None = None,
     structeqtable_output_formats: str | None = None,
+    structeqtable_flash_attn: bool | None = None,
+    structeqtable_max_new_tokens: int = 1024,
+    structeqtable_max_time: int = 30,
 ):
     if engine_name == "mock":
         return MockTableRecognitionEngine()
@@ -131,6 +158,9 @@ def build_engine(
         return StructEqTableEngine(
             ckpt_path=structeqtable_ckpt,
             output_formats=parse_output_formats(structeqtable_output_formats),
+            flash_attn=structeqtable_flash_attn,
+            max_new_tokens=structeqtable_max_new_tokens,
+            max_time=structeqtable_max_time,
         )
     raise ValueError(f"Unsupported engine: {engine_name}")
 

@@ -20,11 +20,25 @@ class StructEqTableEngine:
         self,
         ckpt_path: str | None = None,
         output_formats: tuple[str, ...] | None = None,
+        flash_attn: bool | None = None,
+        max_new_tokens: int = 1024,
+        max_time: int = 30,
     ) -> None:
-        self.ckpt_path = ckpt_path or os.environ.get("STRUCT_EQTABLE_CKPT_PATH")
+        self.ckpt_path = (
+            ckpt_path
+            or os.environ.get("STRUCT_EQTABLE_CKPT_PATH")
+            or self._RECOMMENDED_CKPT
+        )
         self.output_formats = output_formats or _parse_output_formats(
             os.environ.get("STRUCT_EQTABLE_OUTPUT_FORMATS")
         )
+        self.flash_attn = (
+            flash_attn
+            if flash_attn is not None
+            else _parse_bool(os.environ.get("STRUCT_EQTABLE_FLASH_ATTN"), default=False)
+        )
+        self.max_new_tokens = max_new_tokens
+        self.max_time = max_time
         self._module: Any | None = None
         self._model: Any | None = None
         self._import_errors: list[str] = []
@@ -58,11 +72,12 @@ class StructEqTableEngine:
                     "model_configured": bool(self.ckpt_path),
                     "configured_ckpt_path": self.ckpt_path or "",
                     "recommended_ckpt_path": self._RECOMMENDED_CKPT,
+                    "flash_attn": self.flash_attn,
                 },
                 error_message=str(exc),
                 engine_message=(
                     "StructEqTable dependency is installed, but model loading is not ready. "
-                    "Set STRUCT_EQTABLE_CKPT_PATH or pass --structeqtable-ckpt to enable real inference."
+                    "Check model download/access, local hardware, and optional acceleration dependencies."
                 ),
             )
         except Exception as exc:  # pragma: no cover - depends on optional engine.
@@ -118,7 +133,12 @@ class StructEqTableEngine:
             raise StructEqTableUnavailable(
                 "struct_eqtable.build_model is unavailable in the installed package."
             )
-        self._model = build_model(self.ckpt_path)
+        self._model = build_model(
+            self.ckpt_path,
+            flash_attn=self.flash_attn,
+            max_new_tokens=self.max_new_tokens,
+            max_time=self.max_time,
+        )
         try:
             self._model.eval()
         except AttributeError:
@@ -170,6 +190,9 @@ class StructEqTableEngine:
             "engine": self.name,
             "module": getattr(module, "__name__", ""),
             "ckpt_path": self.ckpt_path,
+            "flash_attn": self.flash_attn,
+            "max_new_tokens": self.max_new_tokens,
+            "max_time": self.max_time,
             "source_image_path": str(image_path),
             "candidate": {
                 "region_id": candidate_metadata.get("region_id"),
@@ -243,3 +266,9 @@ def _parse_output_formats(raw_value: str | None) -> tuple[str, ...]:
         if value.strip()
     )
     return formats or ("html", "markdown", "latex")
+
+
+def _parse_bool(raw_value: str | None, default: bool) -> bool:
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
