@@ -21,7 +21,7 @@
 - 前端原型已有阶段性成果：根目录 `streamlit_app.py` 是 Streamlit 轻量原型，包含总览工作台、新上传任务、结果查看等页面方向。
 - 旧版图纸切割已验证过基础能力：本地存在 `new_table_parsing`、`table_parsing_klu` 等历史分支和 `drawing-standard-poc/backend/scripts/` 相关脚本；准确边界待人工确认。
 - 新版图纸切割重构分支效果较好：当前分支 `feature/phase1-layout-governance-opus` 下的 `poc_layout_refactor/` 已能输出 layout overlay、final candidate JSON 和 crop 图片。
-- table-recognition 尚未正式启动：下一步准备基于新版切割结果继续推进，不建议再从旧版切割分支直接延展。
+- table-recognition 已启动 Phase 3 第一轮实现：新增根目录 `table_recognition/` 离线验证模块，基于新版切割 final candidates 继续推进，不从旧版切割分支直接延展。
 
 ## 3. Phase 规划
 
@@ -57,8 +57,9 @@
 - 目标：基于 Phase 2 输出的 crop 图片验证表格识别能力。
 - 输入：`poc_layout_refactor/output/{pdf_name}/candidates/candidate_*.png`。
 - 输出：HTML / Markdown / CSV / JSON 等表格识别结果，以及 crop 图与识别结果对比。
-- 当前状态：尚未正式启动。
-- 相关目录/分支：建议从 `feature/phase1-layout-governance-opus` 切出 `feature/table-recognition`；本地 `new_table_parsing`、`table_parsing_klu` 可作为历史参考，待人工确认。
+- 当前状态：已启动 mock baseline。根目录 `table_recognition/` 已提供 candidate loader、mock engine、StructEqTable/StructTable adapter 骨架、output writer 和 CLI runner；sample mock 运行可处理 5 个 table/title_block candidates，并跳过 1 个 text candidate。
+- 相关目录/分支：`table_recognition/`、`poc_layout_refactor/output/{pdf_name}/table_recognition/`、当前分支 `feature/table-recognition`；本地 `new_table_parsing`、`table_parsing_klu` 可作为历史参考，待人工确认。
+- 当前 engine 状态：`mock` 可运行但不代表真实 OCR/表格识别效果；`structeqtable`/`structtable` adapter 已预留，当前本地依赖不可用，运行结果记录为 `engine_unavailable`；MinerU adapter 待后续实现。
 - 暂不处理内容：数据库入库、完整字段业务映射、最终审查结论自动化。
 
 ### Phase 4：字段映射、结果校验与人工修正
@@ -88,11 +89,11 @@
 | `new_table_parsing` | 旧版切割/表格解析相关分支 | 本地存在，提交点较新，具体边界待人工确认 | 历史表格解析/切割资产，待人工确认 | 否，作为历史验证资产 | 只做思路对比，合并前需人工确认可复用代码 |
 | `table_parsing_klu` | 旧版切割/表格解析相关分支 | 本地存在，具体边界待人工确认 | 历史表格解析/切割资产，待人工确认 | 否，作为历史验证资产 | 只做历史结果对比，不建议延展为主线 |
 | `feature/phase1-layout-governance-opus` | 新版图纸切割重构分支 | 当前分支，Phase 2 效果较好 | `poc_layout_refactor/`、layout overlay、candidate crop、debug report | 是 | 文档收尾后作为 `feature/table-recognition` 基础 |
-| `feature/table-recognition` | 后续表格识别分支 | 尚未创建 | 计划输出 HTML / Markdown / CSV / JSON 表格识别结果 | 是，建议从当前分支切出 | 基于新版 crop 图片验证 MinerU / StructEqTable / StructTable |
+| `feature/table-recognition` | 后续表格识别分支 | 已启动 Phase 3 mock baseline | `table_recognition/`、`poc_layout_refactor/output/{pdf_name}/table_recognition/{engine}/`、HTML / Markdown / CSV / JSON / manifest 输出 | 是 | 基于新版 crop 图片验证 mock baseline 和 StructEqTable / StructTable adapter；真实模型依赖状态待人工确认 |
 
 当前 git 信息：
 
-- 当前分支：`feature/phase1-layout-governance-opus`
+- 当前分支：`feature/table-recognition`
 - 本地分支：`feature/phase1-layout-governance-opus`、`kaixin/frontend`、`master`、`new_table_parsing`、`table_parsing_klu`
 - 最近提交：`4bfbf81 opus modification version`、`949bcd4 improvement`、`f7a73f8 revert frontend` 等
 - 当前未提交修改：`poc_layout_refactor/config.yaml`、`poc_layout_refactor/run_pipeline.py`、`poc_layout_refactor/src/cropper.py`、`poc_layout_refactor/src/pdf_render.py`
@@ -206,6 +207,13 @@ feature/table-recognition
 - 输出 HTML / Markdown / CSV / JSON。
 - 在前端展示原始 crop 图与识别结果对比。
 - 重点验证工程图纸表格的识别准确率、合并单元格、密集表格线、特殊符号和工程字体问题。
+
+当前第一轮实现：
+
+- 新增 `table_recognition/` 独立模块，只消费 `candidate_regions_merged.json` 和 `candidates/candidate_*.png`，不重新做 layout detection 或 crop。
+- `mock` engine 已跑通 sample baseline：6 个 total candidates，5 个 table/title_block candidates 进入处理，1 个 text candidate 被跳过。
+- `structeqtable`/`structtable` CLI adapter 已预留；当前本地依赖不可用时会在 manifest 中记录 `engine_unavailable`，不影响 mock baseline。
+- 输出目录按 engine 隔离：`poc_layout_refactor/output/{pdf_name}/table_recognition/{engine}/`。
 
 暂不处理：
 
