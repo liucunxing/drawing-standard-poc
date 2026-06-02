@@ -1072,25 +1072,213 @@ def go_to_page(page: str) -> None:
     st.rerun()
 
 
+UPLOAD_ACTION_LABELS = {
+    "upload": "开始上传",
+    "process": "开始识别",
+    "markdown": "转为Markdown",
+    "detect": "标准检测",
+}
+
+
+def ensure_upload_state() -> None:
+    state_defaults = {
+        "upload_completed": False,
+        "current_task_id": None,
+        "tables_parsed": False,
+        "current_tables": [],
+        "markdown_conversion_completed": False,
+        "markdown_file_paths": [],
+        "markdown_results": [],
+        "standard_detection_results": None,
+        "upload_action_busy": False,
+        "upload_action_name": None,
+        "upload_action_feedback": None,
+    }
+    for key, default in state_defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = deepcopy(default) if isinstance(default, (list, dict)) else default
+
+
+def start_upload_action(action: str) -> None:
+    st.session_state.upload_action_busy = True
+    st.session_state.upload_action_name = action
+    st.session_state.upload_action_feedback = None
+
+
+def finish_upload_action(
+    feedback_type: str | None = None,
+    message: str | None = None,
+) -> None:
+    st.session_state.upload_action_busy = False
+    st.session_state.upload_action_name = None
+    st.session_state.upload_action_feedback = (
+        {"type": feedback_type, "message": message}
+        if feedback_type and message
+        else None
+    )
+
+
+def finish_upload_action_and_rerun(
+    feedback_type: str | None = None,
+    message: str | None = None,
+) -> None:
+    finish_upload_action(feedback_type, message)
+    st.rerun()
+
+
+def reset_markdown_outputs() -> None:
+    st.session_state.markdown_conversion_completed = False
+    st.session_state.markdown_file_paths = []
+    st.session_state.markdown_results = []
+    st.session_state.standard_detection_results = None
+
+
+def reset_table_outputs() -> None:
+    st.session_state.tables_parsed = False
+    st.session_state.current_tables = []
+    reset_markdown_outputs()
+
+
+def render_upload_feedback() -> None:
+    feedback = st.session_state.upload_action_feedback
+    if not feedback:
+        return
+
+    renderer = getattr(st, feedback.get("type", "info"), st.info)
+    renderer(feedback.get("message", ""))
+    st.session_state.upload_action_feedback = None
+
+
+def render_table_previews(tables: list[dict[str, Any]]) -> None:
+    if not tables:
+        return
+
+    st.markdown("### 📸 表格图片预览")
+
+    cols_per_row = 2
+    for index in range(0, len(tables), cols_per_row):
+        cols = st.columns(cols_per_row)
+        for offset in range(cols_per_row):
+            table_index = index + offset
+            if table_index >= len(tables):
+                continue
+
+            table = tables[table_index]
+            image_url = table.get("image_url", "")
+            page = table.get("page", 0)
+
+            with cols[offset]:
+                st.caption(f"第{page}页 - 表格 {table_index + 1}")
+                if image_url:
+                    full_url = f"{BACKEND_BASE_URL}{image_url}"
+                    st.image(full_url, use_container_width=True)
+                    st.caption(f"URL: {full_url}")
+                else:
+                    st.warning("图片路径无效")
+
+
+def render_markdown_results(results: list[dict[str, Any]]) -> None:
+    if not results:
+        return
+
+    st.markdown("### 📄 Markdown 转换结果")
+    current_task_id = st.session_state.current_task_id or "current"
+
+    for result in results:
+        if result.get("success"):
+            table_index = result.get("table_index", 0)
+            md_content = result.get("md_content", "")
+            patched = result.get("patched", False)
+
+            with st.expander(f"表格 {table_index} {'(已优化)' if patched else ''}", expanded=False):
+                if md_content:
+                    if "<table>" in md_content or "<tr>" in md_content:
+                        st.markdown(md_content, unsafe_allow_html=True)
+                    else:
+                        st.markdown(md_content)
+
+                    st.download_button(
+                        label=f"📥 下载表格 {table_index} 的 Markdown",
+                        data=md_content,
+                        file_name=f"table_{table_index}.md",
+                        mime="text/markdown",
+                        key=f"download_table_{current_task_id}_{table_index}",
+                    )
+                else:
+                    st.info("Markdown 内容为空")
+        else:
+            table_index = result.get("table_index", 0)
+            error = result.get("error", "未知错误")
+            st.error(f"❌ 表格 {table_index} 转换失败: {error}")
+
+
+def render_standard_detection_results(detection_data: dict[str, Any]) -> None:
+    if not detection_data:
+        return
+
+    total_standards = detection_data.get("total_standards", 0)
+    exact_match = detection_data.get("exact_match_count", 0)
+    year_mismatch = detection_data.get("year_mismatch_count", 0)
+    similar = detection_data.get("similar_count", 0)
+    not_found = detection_data.get("not_found_count", 0)
+
+    st.markdown("### 📊 标准检测统计")
+
+    stat_cols = st.columns(5)
+    stat_cols[0].metric("总计", total_standards)
+    stat_cols[1].metric("完全符合", exact_match)
+    stat_cols[2].metric("年份不一致", year_mismatch)
+    stat_cols[3].metric("较为相似", similar)
+    stat_cols[4].metric("不存在", not_found)
+
+    results = detection_data.get("results", [])
+    if not results:
+        st.info("ℹ️ 未在Markdown文件中检测到标准号。")
+        return
+
+    st.markdown("### 📋 详细检测结果")
+
+    table_groups: dict[int, list[dict[str, Any]]] = {}
+    for result in results:
+        table_idx = result.get("table_index", 0)
+        table_groups.setdefault(table_idx, []).append(result)
+
+    for table_idx in sorted(table_groups.keys()):
+        table_results = table_groups[table_idx]
+        md_file = table_results[0].get("markdown_file", "")
+        md_filename = Path(md_file).name if md_file else f"表格 {table_idx}"
+
+        with st.expander(f"📄 {md_filename} ({len(table_results)} 个标准号)", expanded=False):
+            for index, result in enumerate(table_results, 1):
+                extracted = result.get("extracted", {})
+                matched = result.get("matched_library_entry")
+                status = result.get("status", "")
+                score = result.get("score", 0)
+                message = result.get("message", "")
+
+                status_color = {
+                    "完全符合": "green",
+                    "年份不一致": "orange",
+                    "较为相似": "blue",
+                    "不存在": "red",
+                    "解析错误": "red",
+                }.get(status, "gray")
+
+                st.markdown(f"""
+                <div style="background-color: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 4px solid {status_color};">
+                    <strong>标准号 {index}:</strong> <code style="background-color: #e9ecef; padding: 2px 6px; border-radius: 3px;">{extracted.get('original', 'N/A')}</code><br>
+                    <strong>比对结果:</strong> <span style="color: {status_color}; font-weight: bold;">{status}</span> (分数: {score})<br>
+                    <strong>标准库匹配:</strong> {matched.get('original', '无') if matched else '无'}<br>
+                    <strong>说明:</strong> {message}
+                </div>
+                """, unsafe_allow_html=True)
+
+
 def render_upload(tasks: list[dict[str, Any]]) -> None:
     st.title("图纸识别系统 / 新上传任务")
     st.markdown('<p class="section-note">上传 PDF 图纸，启动新的识别任务</p>', unsafe_allow_html=True)
 
-    # 初始化session state用于控制按钮状态 (必须在表单外初始化)
-    if "upload_completed" not in st.session_state:
-        st.session_state.upload_completed = False
-    if "current_task_id" not in st.session_state:
-        st.session_state.current_task_id = None
-    if "tables_parsed" not in st.session_state:
-        st.session_state.tables_parsed = False
-    if "current_tables" not in st.session_state:
-        st.session_state.current_tables = []
-    if "markdown_conversion_completed" not in st.session_state:
-        st.session_state.markdown_conversion_completed = False
-    if "markdown_file_paths" not in st.session_state:
-        st.session_state.markdown_file_paths = []
-    if "standard_detection_results" not in st.session_state:
-        st.session_state.standard_detection_results = None
+    ensure_upload_state()
 
     with st.form("new_task_form", clear_on_submit=False):
         task_name = st.text_input("任务名称", placeholder="请输入任务名称(可选,不填则使用文件名)")
@@ -1116,336 +1304,255 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
             )
         else:
             st.caption("尚未选择文件")
-        
-        # 四个按钮: 使用 form_submit_button，在表单内
-        col1, col2, col3, col4 = st.columns([0.2, 0.2, 0.25, 0.25])
-        
-        upload_submitted = col1.form_submit_button("开始上传", type="primary")
-        process_submitted = col2.form_submit_button("开始识别", type="primary")
-        markdown_submitted = col3.form_submit_button("转为Markdown", type="primary")
-        detect_standards_submitted = col4.form_submit_button("标准检测", type="primary")
 
-    # 处理上传按钮点击
+        buttons_disabled = st.session_state.upload_action_busy
+
+        col1, col2, col3, col4 = st.columns([0.2, 0.2, 0.25, 0.25])
+
+        upload_submitted = col1.form_submit_button(
+            "开始上传",
+            type="primary",
+            disabled=buttons_disabled,
+            on_click=start_upload_action,
+            args=("upload",),
+        )
+        process_submitted = col2.form_submit_button(
+            "开始识别",
+            type="primary",
+            disabled=buttons_disabled,
+            on_click=start_upload_action,
+            args=("process",),
+        )
+        markdown_submitted = col3.form_submit_button(
+            "转为Markdown",
+            type="primary",
+            disabled=buttons_disabled,
+            on_click=start_upload_action,
+            args=("markdown",),
+        )
+        detect_standards_submitted = col4.form_submit_button(
+            "标准检测",
+            type="primary",
+            disabled=buttons_disabled,
+            on_click=start_upload_action,
+            args=("detect",),
+        )
+
+    if st.session_state.upload_action_busy and st.session_state.upload_action_name:
+        action_label = UPLOAD_ACTION_LABELS.get(
+            st.session_state.upload_action_name,
+            st.session_state.upload_action_name,
+        )
+        st.info(f"正在执行“{action_label}”，其他按钮已暂时禁用，请等待后端返回。")
+
     if upload_submitted:
         if not uploaded_files:
-            st.warning("请至少选择一个 PDF 文件。")
-        else:
-            # 1. 上传第一个文件到后端（目前只支持单文件上传）
-            with st.spinner(f"正在上传 {uploaded_files[0].name} 到后端..."):
-                upload_result = upload_pdf_to_backend(
-                    uploaded_files[0],
-                    task_name=task_name.strip() if task_name.strip() else None
-                )
-            
-            if upload_result["success"]:
-                # 上传成功，创建前端任务记录
-                backend_data = upload_result["data"]
-                task_id = backend_data.get("task_id")
-                
-                detail = build_uploaded_task(
-                    task_name.strip() if task_name.strip() else uploaded_files[0].name,
-                    description.strip(),
-                    uploaded_files,
-                )
-                # 使用后端返回的task_id
-                detail["task_id"] = task_id
-                detail["backend_file_path"] = backend_data.get("file_path", "")
-                
-                st.session_state.task_details[detail["task_id"]] = detail
-                upsert_task_summary(normalize_task_summary(detail))
-                st.session_state.selected_task_id = detail["task_id"]
-                st.session_state.current_task_id = task_id
-                
-                st.success(f"✅ {upload_result['message']}\n\n任务ID: {task_id}\n文件已保存到: {backend_data.get('file_path', '未知')}")
-            else:
-                # 上传失败
-                st.error(f"❌ 上传失败: {upload_result['message']}")
+            finish_upload_action_and_rerun("warning", "请至少选择一个 PDF 文件。")
 
-    # 处理识别按钮点击
+        normalized_task_name = task_name.strip()
+        with st.spinner(f"正在上传 {uploaded_files[0].name} 到后端..."):
+            upload_result = upload_pdf_to_backend(
+                uploaded_files[0],
+                task_name=normalized_task_name or None,
+            )
+
+        if upload_result["success"]:
+            backend_data = upload_result["data"]
+            task_id = backend_data.get("task_id")
+
+            detail = build_uploaded_task(
+                normalized_task_name or uploaded_files[0].name,
+                description.strip(),
+                uploaded_files,
+            )
+            detail["task_id"] = task_id
+            detail["backend_file_path"] = backend_data.get("file_path", "")
+
+            st.session_state.task_details[detail["task_id"]] = detail
+            upsert_task_summary(normalize_task_summary(detail))
+            st.session_state.selected_task_id = detail["task_id"]
+            st.session_state.current_task_id = task_id
+            st.session_state.upload_completed = True
+            reset_table_outputs()
+
+            finish_upload_action_and_rerun(
+                "success",
+                f"✅ {upload_result['message']}\n\n任务ID: {task_id}\n文件已保存到: {backend_data.get('file_path', '未知')}",
+            )
+
+        finish_upload_action_and_rerun("error", f"❌ 上传失败: {upload_result['message']}")
+
     if process_submitted:
         task_id = st.session_state.current_task_id
         if not task_id:
-            st.warning("请先上传PDF文件。")
-        else:
-            # 先查询数据库状态
-            with st.spinner("🔍 正在查询任务状态..."):
-                status_result = check_parse_status(task_id)
-            
-            if not status_result["success"]:
-                st.error(f"❌ 查询失败: {status_result.get('message')}")
-            else:
-                status_data = status_result["data"]
-                status = status_data.get("status", 0)
-                current_step = status_data.get("current_step", "")
-                
-                # 根据状态决定操作
-                if status == 0 or current_step == "文件已上传,等待解析":
-                    # 状态0或待处理: 调用识别接口
-                    with st.spinner("🔍 正在解析PDF并提取表格图片，这可能需要几分钟..."):
-                        process_result = process_tables_from_backend(task_id)
-                    
-                    if process_result["success"]:
-                        process_data = process_result["data"]
-                        total_tables = process_data.get("total_tables", 0)
-                        tables = process_data.get("tables", [])
-                        
-                        # 打印调试信息
-                        print(f"[前端调试] 解析结果: {process_data}")
-                        if tables:
-                            print(f"[前端调试] 第一个表格的image_url: {tables[0].get('image_url')}")
-                            print(f"[前端调试] 完整URL: {BACKEND_BASE_URL}{tables[0].get('image_url')}")
-                        
-                        # 更新detail中的tables信息
-                        if task_id in st.session_state.task_details:
-                            detail = st.session_state.task_details[task_id]
-                            detail["tables"] = tables
-                            detail["total_pages"] = process_data.get("total_pages", 0)
-                            detail["total_tables"] = total_tables
-                            st.session_state.task_details[task_id] = detail
-                        
-                        # 保存tables到session state供Markdown转换使用
-                        st.session_state.current_tables = tables
-                        
-                        print(f"[前端调试] 已保存 {len(tables)} 个表格到 session_state")
-                        
-                        st.success(f"✅ {process_result['message']}\n\n共识别到 {total_tables} 个表格")
-                        
-                        # 3. 显示表格图片预览
-                        if tables:
-                            st.markdown("### 📸 表格图片预览")
-                            
-                            # 每行显示2个表格
-                            cols_per_row = 2
-                            for i in range(0, len(tables), cols_per_row):
-                                cols = st.columns(cols_per_row)
-                                for j in range(cols_per_row):
-                                    if i + j < len(tables):
-                                        table = tables[i + j]
-                                        image_url = table.get("image_url", "")
-                                        page = table.get("page", 0)
-                                        
-                                        with cols[j]:
-                                            st.caption(f"第{page}页 - 表格 {i+j+1}")
-                                            if image_url:
-                                                full_url = f"{BACKEND_BASE_URL}{image_url}"
-                                                st.image(full_url, use_container_width=True)
-                                                st.caption(f"URL: {full_url}")
-                                            else:
-                                                st.warning("图片路径无效")
-                    else:
-                        st.error(f"❌ 解析失败: {process_result['message']}")
-                elif status == 2 or current_step == "解析完成":
-                    # 已完成: 提示用户直接转Markdown
-                    st.info("✅ 表格已经解析完成，请点击'转为Markdown'按钮。")
-                elif status == 1:
-                    # 解析中: 提示用户等待
-                    st.warning(f" 任务正在解析中，请稍后重试。\n\n当前状态: {current_step}")
-                elif status == 3:
-                    # 失败: 提示重新解析
-                    st.error(f"❌ 上次解析失败: {current_step}\n\n请重新点击'开始识别'重试。")
-                else:
-                    st.warning(f" 未知状态: status={status}, step={current_step}")
+            finish_upload_action_and_rerun("warning", "请先上传PDF文件。")
 
-    # 处理Markdown转换按钮点击
+        with st.spinner("🔍 正在查询任务状态..."):
+            status_result = check_parse_status(task_id)
+
+        if not status_result["success"]:
+            finish_upload_action_and_rerun("error", f"❌ 查询失败: {status_result.get('message')}")
+
+        status_data = status_result["data"]
+        status = status_data.get("status", 0)
+        current_step = status_data.get("current_step", "")
+
+        if status == 0 or current_step == "文件已上传,等待解析":
+            with st.spinner("🔍 正在解析PDF并提取表格图片，这可能需要几分钟..."):
+                process_result = process_tables_from_backend(task_id)
+
+            if process_result["success"]:
+                process_data = process_result["data"]
+                total_tables = process_data.get("total_tables", 0)
+                tables = process_data.get("tables", [])
+
+                print(f"[前端调试] 解析结果: {process_data}")
+                if tables:
+                    print(f"[前端调试] 第一个表格的image_url: {tables[0].get('image_url')}")
+                    print(f"[前端调试] 完整URL: {BACKEND_BASE_URL}{tables[0].get('image_url')}")
+
+                if task_id in st.session_state.task_details:
+                    detail = st.session_state.task_details[task_id]
+                    detail["tables"] = tables
+                    detail["total_pages"] = process_data.get("total_pages", 0)
+                    detail["total_tables"] = total_tables
+                    st.session_state.task_details[task_id] = detail
+
+                st.session_state.current_tables = tables
+                st.session_state.tables_parsed = bool(tables)
+                reset_markdown_outputs()
+
+                print(f"[前端调试] 已保存 {len(tables)} 个表格到 session_state")
+
+                finish_upload_action_and_rerun(
+                    "success",
+                    f"✅ {process_result['message']}\n\n共识别到 {total_tables} 个表格",
+                )
+
+            finish_upload_action_and_rerun("error", f"❌ 解析失败: {process_result['message']}")
+
+        if status == 2 or current_step == "解析完成":
+            finish_upload_action_and_rerun("info", "✅ 表格已经解析完成，请点击'转为Markdown'按钮。")
+        if status == 1:
+            finish_upload_action_and_rerun("warning", f"任务正在解析中，请稍后重试。\n\n当前状态: {current_step}")
+        if status == 3:
+            finish_upload_action_and_rerun(
+                "error",
+                f"❌ 上次解析失败: {current_step}\n\n请重新点击'开始识别'重试。",
+            )
+
+        finish_upload_action_and_rerun("warning", f"未知状态: status={status}, step={current_step}")
+
     if markdown_submitted:
         task_id = st.session_state.current_task_id
-        
-        if not task_id:
-            st.warning("请先上传PDF文件。")
-        else:
-            # 先查询数据库状态
-            with st.spinner("🔍 正在查询任务状态..."):
-                status_result = check_parse_status(task_id)
-            
-            if not status_result["success"]:
-                st.error(f"❌ 查询失败: {status_result.get('message')}")
-            else:
-                status_data = status_result["data"]
-                status = status_data.get("status", 0)
-                current_step = status_data.get("current_step", "")
-                
-                # 根据状态决定操作
-                if status == 2 or current_step == "解析完成":
-                    # 解析完成: 调用Markdown转换接口
-                    tables = st.session_state.current_tables
-                    
-                    print(f"[前端调试] Markdown按钮: status={status}, tables数量={len(tables) if tables else 0}")
-                    
-                    # 如果 session_state 中没有 tables，重新调用识别接口获取（不会重复解析，因为状态已是完成）
-                    if not tables:
-                        print(f"[前端调试] session_state 中没有 tables，重新调用识别接口获取")
-                        with st.spinner(" 正在获取表格数据..."):
-                            process_result = process_tables_from_backend(task_id)
-                        
-                        if process_result["success"]:
-                            tables = process_result["data"].get("tables", [])
-                            st.session_state.current_tables = tables  # 保存到 session_state
-                            print(f"[前端调试] 重新获取到 {len(tables)} 个表格")
-                        else:
-                            st.error(f"❌ 获取表格数据失败: {process_result['message']}")
-                            return
-                    
-                    if not tables:
-                        st.warning("⚠️ 未找到表格数据，请重新点击'开始识别'。")
-                        return
-                    else:
-                        with st.spinner("📝 正在将表格图片转换为Markdown，这可能需要较长时间..."):
-                            markdown_result = convert_to_markdown_from_backend(task_id, tables)
-                        
-                        if markdown_result["success"]:
-                            markdown_data = markdown_result["data"]
-                            results = markdown_data.get("results", [])
-                            success_count = markdown_data.get("success_count", 0)
-                            total_tables = markdown_data.get("total_tables", 0)
-                            
-                            st.success(f"✅ {markdown_result['message']}\n\n成功转换 {success_count}/{total_tables} 个表格")
-                            
-                            # 收集所有Markdown文件路径
-                            md_file_paths = []
-                            for result in results:
-                                if result.get("success"):
-                                    md_file = result.get("md_file", "")
-                                    if md_file:
-                                        md_file_paths.append(md_file)
-                            
-                            # 保存到 session state
-                            st.session_state.markdown_file_paths = md_file_paths
-                            st.session_state.markdown_conversion_completed = True
-                            print(f"[前端调试] 已保存 {len(md_file_paths)} 个Markdown文件路径")
-                            
-                            # 显示Markdown内容
-                            if results:
-                                st.markdown("### 📄 Markdown 转换结果")
-                                
-                                for result in results:
-                                    if result.get("success"):
-                                        table_index = result.get("table_index", 0)
-                                        md_content = result.get("md_content", "")
-                                        patched = result.get("patched", False)
-                                        
-                                        # 使用expander折叠显示
-                                        with st.expander(f"表格 {table_index} {'(已优化)' if patched else ''}", expanded=False):
-                                            if md_content:
-                                                # MinerU 输出的是 HTML 表格，需要用 unsafe_allow_html=True 渲染
-                                                if '<table>' in md_content or '<tr>' in md_content:
-                                                    st.markdown(md_content, unsafe_allow_html=True)
-                                                else:
-                                                    st.markdown(md_content)
-                                                
-                                                # 添加下载按钮
-                                                st.download_button(
-                                                    label=f"📥 下载表格 {table_index} 的 Markdown",
-                                                    data=md_content,
-                                                    file_name=f"table_{table_index}.md",
-                                                    mime="text/markdown",
-                                                    key=f"download_table_{table_index}",
-                                                )
-                                            else:
-                                                st.info("Markdown 内容为空")
-                                    else:
-                                        table_index = result.get("table_index", 0)
-                                        error = result.get("error", "未知错误")
-                                        st.error(f"❌ 表格 {table_index} 转换失败: {error}")
-                        else:
-                            st.error(f"❌ 转换失败: {markdown_result['message']}")
-                elif status == 0 or status == 1:
-                    # 待处理或解析中: 提示用户等待
-                    st.warning(f"️ 表格还未提取完成，请先点击'开始识别'并等待解析完成。\n\n当前状态: {current_step}")
-                elif status == 3:
-                    # 失败: 提示重新解析
-                    st.error(f"❌ 上次解析失败: {current_step}\n\n请先重新点击'开始识别'进行解析。")
-                else:
-                    st.warning(f" 未知状态: status={status}, step={current_step}")
 
-    # 处理标准检测按钮点击
+        if not task_id:
+            finish_upload_action_and_rerun("warning", "请先上传PDF文件。")
+
+        with st.spinner("🔍 正在查询任务状态..."):
+            status_result = check_parse_status(task_id)
+
+        if not status_result["success"]:
+            finish_upload_action_and_rerun("error", f"❌ 查询失败: {status_result.get('message')}")
+
+        status_data = status_result["data"]
+        status = status_data.get("status", 0)
+        current_step = status_data.get("current_step", "")
+
+        if status == 2 or current_step == "解析完成":
+            tables = st.session_state.current_tables
+
+            print(f"[前端调试] Markdown按钮: status={status}, tables数量={len(tables) if tables else 0}")
+
+            if not tables:
+                print("[前端调试] session_state 中没有 tables，重新调用识别接口获取")
+                with st.spinner("正在获取表格数据..."):
+                    process_result = process_tables_from_backend(task_id)
+
+                if process_result["success"]:
+                    tables = process_result["data"].get("tables", [])
+                    st.session_state.current_tables = tables
+                    st.session_state.tables_parsed = bool(tables)
+                    print(f"[前端调试] 重新获取到 {len(tables)} 个表格")
+                else:
+                    finish_upload_action_and_rerun("error", f"❌ 获取表格数据失败: {process_result['message']}")
+
+            if not tables:
+                finish_upload_action_and_rerun("warning", "⚠️ 未找到表格数据，请重新点击'开始识别'。")
+
+            with st.spinner("📝 正在将表格图片转换为Markdown，这可能需要较长时间..."):
+                markdown_result = convert_to_markdown_from_backend(task_id, tables)
+
+            if markdown_result["success"]:
+                markdown_data = markdown_result["data"]
+                results = markdown_data.get("results", [])
+                success_count = markdown_data.get("success_count", 0)
+                total_tables = markdown_data.get("total_tables", 0)
+
+                md_file_paths = []
+                for result in results:
+                    if result.get("success"):
+                        md_file = result.get("md_file", "")
+                        if md_file:
+                            md_file_paths.append(md_file)
+
+                st.session_state.markdown_file_paths = md_file_paths
+                st.session_state.markdown_results = results
+                st.session_state.markdown_conversion_completed = True
+                st.session_state.standard_detection_results = None
+                print(f"[前端调试] 已保存 {len(md_file_paths)} 个Markdown文件路径")
+
+                finish_upload_action_and_rerun(
+                    "success",
+                    f"✅ {markdown_result['message']}\n\n成功转换 {success_count}/{total_tables} 个表格",
+                )
+
+            finish_upload_action_and_rerun("error", f"❌ 转换失败: {markdown_result['message']}")
+
+        if status == 0 or status == 1:
+            finish_upload_action_and_rerun(
+                "warning",
+                f"️ 表格还未提取完成，请先点击'开始识别'并等待解析完成。\n\n当前状态: {current_step}",
+            )
+        if status == 3:
+            finish_upload_action_and_rerun(
+                "error",
+                f"❌ 上次解析失败: {current_step}\n\n请先重新点击'开始识别'进行解析。",
+            )
+
+        finish_upload_action_and_rerun("warning", f"未知状态: status={status}, step={current_step}")
+
     if detect_standards_submitted:
         task_id = st.session_state.current_task_id
-        
+
         if not task_id:
-            st.warning("请先上传PDF文件。")
-        elif not st.session_state.markdown_conversion_completed:
-            st.warning("请先将表格转为Markdown格式。")
-        else:
-            markdown_files = st.session_state.markdown_file_paths
-            
-            if not markdown_files:
-                st.warning("⚠️ 未找到Markdown文件，请重新点击'转为Markdown'。")
-            else:
-                with st.spinner(f"🔍 正在检测 {len(markdown_files)} 个Markdown文件中的标准号..."):
-                    detection_result = detect_standards_from_backend(task_id, markdown_files)
-                
-                if detection_result["success"]:
-                    detection_data = detection_result["data"]
-                    
-                    # 保存检测结果到 session state
-                    st.session_state.standard_detection_results = detection_data
-                    
-                    total_standards = detection_data.get("total_standards", 0)
-                    exact_match = detection_data.get("exact_match_count", 0)
-                    year_mismatch = detection_data.get("year_mismatch_count", 0)
-                    similar = detection_data.get("similar_count", 0)
-                    not_found = detection_data.get("not_found_count", 0)
-                    
-                    st.success(f"✅ {detection_result['message']}\n\n共检测到 {total_standards} 个标准号")
-                    
-                    # 显示统计信息
-                    st.markdown("### 📊 标准检测统计")
-                    
-                    stat_cols = st.columns(5)
-                    stat_cols[0].metric("总计", total_standards)
-                    stat_cols[1].metric("完全符合", exact_match)
-                    stat_cols[2].metric("年份不一致", year_mismatch)
-                    stat_cols[3].metric("较为相似", similar)
-                    stat_cols[4].metric("不存在", not_found)
-                    
-                    # 显示详细结果
-                    results = detection_data.get("results", [])
-                    if results:
-                        st.markdown("### 📋 详细检测结果")
-                        
-                        # 按表格分组显示
-                        table_groups = {}
-                        for result in results:
-                            table_idx = result.get("table_index", 0)
-                            if table_idx not in table_groups:
-                                table_groups[table_idx] = []
-                            table_groups[table_idx].append(result)
-                        
-                        # 遍历每个表格的检测结果
-                        for table_idx in sorted(table_groups.keys()):
-                            table_results = table_groups[table_idx]
-                            md_file = table_results[0].get("markdown_file", "")
-                            md_filename = Path(md_file).name if md_file else f"表格 {table_idx}"
-                            
-                            with st.expander(f"📄 {md_filename} ({len(table_results)} 个标准号)", expanded=False):
-                                for idx, result in enumerate(table_results, 1):
-                                    extracted = result.get("extracted", {})
-                                    matched = result.get("matched_library_entry")
-                                    status = result.get("status", "")
-                                    score = result.get("score", 0)
-                                    message = result.get("message", "")
-                                    
-                                    # 根据状态选择颜色
-                                    status_color = {
-                                        "完全符合": "green",
-                                        "年份不一致": "orange",
-                                        "较为相似": "blue",
-                                        "不存在": "red",
-                                        "解析错误": "red"
-                                    }.get(status, "gray")
-                                    
-                                    st.markdown(f"""
-                                    <div style="background-color: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 4px solid {status_color};">
-                                        <strong>标准号 {idx}:</strong> <code style="background-color: #e9ecef; padding: 2px 6px; border-radius: 3px;">{extracted.get('original', 'N/A')}</code><br>
-                                        <strong>比对结果:</strong> <span style="color: {status_color}; font-weight: bold;">{status}</span> (分数: {score})<br>
-                                        <strong>标准库匹配:</strong> {matched.get('original', '无') if matched else '无'}<br>
-                                        <strong>说明:</strong> {message}
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                    else:
-                        st.info("ℹ️ 未在Markdown文件中检测到标准号。")
-                else:
-                    st.error(f"❌ 检测失败: {detection_result['message']}")
+            finish_upload_action_and_rerun("warning", "请先上传PDF文件。")
+        if not st.session_state.markdown_conversion_completed:
+            finish_upload_action_and_rerun("warning", "请先将表格转为Markdown格式。")
+
+        markdown_files = st.session_state.markdown_file_paths
+        if not markdown_files:
+            finish_upload_action_and_rerun("warning", "⚠️ 未找到Markdown文件，请重新点击'转为Markdown'。")
+
+        with st.spinner(f"🔍 正在检测 {len(markdown_files)} 个Markdown文件中的标准号..."):
+            detection_result = detect_standards_from_backend(task_id, markdown_files)
+
+        if detection_result["success"]:
+            detection_data = detection_result["data"]
+            total_standards = detection_data.get("total_standards", 0)
+            st.session_state.standard_detection_results = detection_data
+
+            finish_upload_action_and_rerun(
+                "success",
+                f"✅ {detection_result['message']}\n\n共检测到 {total_standards} 个标准号",
+            )
+
+        finish_upload_action_and_rerun("error", f"❌ 检测失败: {detection_result['message']}")
+
+    render_upload_feedback()
+    render_table_previews(st.session_state.current_tables)
+    render_markdown_results(st.session_state.markdown_results)
+    render_standard_detection_results(st.session_state.standard_detection_results)
 
     if st.session_state.current_task_id:
         task_id = st.session_state.current_task_id

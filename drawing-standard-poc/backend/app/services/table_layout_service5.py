@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Tuple
 from uuid import uuid4
 
 import fitz
+import numpy as np
 from PIL import Image, ImageDraw
 
 # ============================================
@@ -68,7 +69,7 @@ class TableLayoutService4Batch:
 
 		self.default_render_zoom = float(os.getenv("PADDLEOCR_VL_RENDER_ZOOM", "3.2"))
 		self.default_max_pages = int(os.getenv("PADDLEOCR_VL_MAX_PAGES", "1"))
-		self.infer_max_side = int(os.getenv("PADDLEOCR_VL_INFER_MAX_SIDE", "3200"))
+		self.infer_max_side = int(os.getenv("PADDLEOCR_VL_INFER_MAX_SIDE", "2800"))
 
 		self.use_doc_orientation_classify = self._read_bool_env(
 			"PADDLEOCR_VL_USE_DOC_ORIENTATION_CLASSIFY",
@@ -819,7 +820,7 @@ class TableLayoutService4Batch:
 		table_index: int,
 	) -> List[str]:
 		"""
-		管口表切割：对于超长表格（长宽比>2.0），固定按 70% 切割，只输出上部。
+		管口表切割：对于超长表格（长宽比>2.0），按 50% 目标位寻找安全切点并保留上下两部分。
 			
 		Args:
 			table_image_path: 一级裁剪的表格图片路径
@@ -846,32 +847,91 @@ class TableLayoutService4Batch:
 				
 			print(
 				f"[testP] [管口表检测] page_{page_idx:03d}_table_{table_index:03d}: "
-				f"长宽比 {aspect_ratio:.2f}，按 70% 固定比例切割"
+				f"长宽比 {aspect_ratio:.2f}，按 50% 目标位寻找安全横线切割"
 			)
 				
-			# 2. 固定按 66% 切割，只输出上部
-			split_y = int(height * 0.66)
-			
-			# 创建输出目录
-			sub_dir = out_dir / f"page_{page_idx:03d}_table_{table_index:03d}_fixed_70"
-			sub_dir.mkdir(parents=True, exist_ok=True)
-			
-			# 只保存上部 70%
-			upper_path = sub_dir / f"page_{page_idx:03d}_table_{table_index:03d}_upper.png"
-			img.crop((0, 0, width, split_y)).save(upper_path)
-			
-			print(
-				f"[testP] [管口表检测] page_{page_idx:03d}_table_{table_index:03d}: "
-				f"成功切割，仅输出上部 70% (split_y={split_y})"
+			# 2. 以 50% 为目标位，优先沿横线切割，避免截断首尾行文字
+			split_y = self._find_safe_horizontal_split(img, target_ratio=0.5)
+			if split_y is None:
+				split_y = int(height * 0.5)
+				print(
+					f"[testP] [管口表检测] page_{page_idx:03d}_table_{table_index:03d}: "
+					f"未找到可靠横线，回退到 50% 固定切割 (split_y={split_y})"
+				)
+
+			# 3. 保留上下两部分，便于后续 OCR 组合处理
+			return self._save_split_tables(
+				img=img,
+				width=width,
+				height=height,
+				split_y=split_y,
+				out_dir=out_dir,
+				page_idx=page_idx,
+				table_index=table_index,
+				method="safe50",
 			)
-			
-			return [str(upper_path)]
 				
 		except Exception as exc:
 			print(f"[testP] [管口表检测] page_{page_idx:03d}_table_{table_index:03d}: 失败 - {exc}")
 			import traceback
 			traceback.print_exc()
 			return []
+
+	def _find_safe_horizontal_split(self, img: Image.Image, target_ratio: float = 0.5) -> int | None:
+		gray = np.array(img.convert("L"))
+		if gray.size == 0:
+			return None
+
+		height, width = gray.shape
+		if width < 80 or height < 120:
+			return None
+
+		ink = gray < 232
+		row_density = ink.mean(axis=1)
+		if row_density.size == 0:
+			return None
+
+		target_y = int(height * target_ratio)
+		search_margin = max(40, int(height * 0.18))
+		search_start = max(0, target_y - search_margin)
+		search_end = min(height, target_y + search_margin)
+		if search_end - search_start < 10:
+			return None
+
+		smooth_density = np.convolve(row_density, np.ones(5, dtype=float) / 5.0, mode="same")
+		search_density = smooth_density[search_start:search_end]
+		if search_density.size == 0:
+			return None
+
+		max_density = float(search_density.max())
+		if max_density > 0:
+			line_threshold = max(0.18, min(0.72, max_density * 0.72))
+			line_spans = [
+				(start + search_start, end + search_start)
+				for start, end in self._mask_to_spans(search_density >= line_threshold)
+				if (end - start) >= 2
+			]
+			if line_spans:
+				best_start, best_end = min(
+					line_spans,
+					key=lambda span: abs(((span[0] + span[1]) // 2) - target_y),
+				)
+				return min(height - 1, max(1, best_end))
+
+		blank_threshold = max(0.0, min(0.03, float(np.percentile(search_density, 25))))
+		blank_spans = [
+			(start + search_start, end + search_start)
+			for start, end in self._mask_to_spans(search_density <= blank_threshold)
+			if (end - start) >= 4
+		]
+		if not blank_spans:
+			return None
+
+		best_start, best_end = min(
+			blank_spans,
+			key=lambda span: abs(((span[0] + span[1]) // 2) - target_y),
+		)
+		return min(height - 1, max(1, (best_start + best_end) // 2))
 	
 	def _save_split_tables(
 		self,
@@ -948,7 +1008,7 @@ class TableLayoutService4Batch:
 
 
 if __name__ == "__main__":
-	local_pdf = Path(r"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\25.918-1 A1.pdf")
+	local_pdf = Path(r"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\03.276-1_A1V（V-182108）.pdf")
 
 	service = TableLayoutService4Batch()
 

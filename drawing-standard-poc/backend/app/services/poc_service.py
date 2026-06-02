@@ -344,6 +344,25 @@ class PocService:
                 # 判断是否应用了补丁
                 patched = result.get('md_patched', False)
                 
+                # 检查是否有 Qwen 管口表修复版本
+                qwen_fixed_md_file = result.get('qwen_fixed_md_file')
+                qwen_fixed_applied = result.get('qwen_fixed_applied', False)
+                qwen_fixed_md_content = ""
+                qwen_fixed_md_url = ""
+                original_md_file = md_file   # 保留原始(未Qwen修复)的md路径
+                original_md_url = md_url
+                original_md_content = md_content
+                
+                if qwen_fixed_applied and qwen_fixed_md_file and Path(qwen_fixed_md_file).exists():
+                    # 有 Qwen 修复版本: 接口主字段返回修复后的md
+                    qwen_fixed_md_content = Path(qwen_fixed_md_file).read_text(encoding='utf-8')
+                    qwen_fixed_md_url = self._local_path_to_url(qwen_fixed_md_file)
+                    # 主字段切换为 Qwen 修复版本
+                    md_file = qwen_fixed_md_file
+                    md_url = qwen_fixed_md_url
+                    md_content = qwen_fixed_md_content
+                    print(f"[POC] 表格 {idx+1} 使用 Qwen 修复版本作为主输出")
+                
                 results.append({
                     "table_index": idx + 1,
                     "source_image": image_path,
@@ -351,10 +370,17 @@ class PocService:
                     "md_url": md_url,
                     "md_content": md_content,
                     "patched": patched,
+                    "qwen_fixed_applied": qwen_fixed_applied,
+                    "qwen_fixed_md_file": qwen_fixed_md_file,
+                    "qwen_fixed_md_url": qwen_fixed_md_url,
+                    "qwen_fixed_md_content": qwen_fixed_md_content,
+                    "original_md_file": original_md_file,
+                    "original_md_url": original_md_url,
+                    "original_md_content": original_md_content,
                     "success": True,
                 })
                 
-                print(f"[POC] 表格 {idx+1} 转换成功: {md_file} {'(已优化)' if patched else '(原始)'}")
+                print(f"[POC] 表格 {idx+1} 转换成功: {md_file} {'(已优化)' if patched else '(原始)'}{'(Qwen修复)' if qwen_fixed_applied else ''}")
                 
             except Exception as exc:
                 print(f"[POC] 表格 {idx+1} 转换失败: {exc}")
@@ -514,19 +540,17 @@ class PocService:
                 # 读取Markdown内容
                 md_content = md_path.read_text(encoding='utf-8')
                 
-                # 提取标准号
-                extracted_codes = comparator.extractor.extract_from_markdown(md_content)
-                
-                if not extracted_codes:
+                # 提取并去重标准号，再与标准库比对
+                match_results = comparator.batch_compare(md_content)
+
+                if not match_results:
                     print(f"[POC] 文件 {md_file_path} 未提取到标准号")
                     continue
-                
-                print(f"[POC] 文件 {md_file_path} 提取到 {len(extracted_codes)} 个标准号")
-                
-                # 比对每个标准号
+
+                print(f"[POC] 文件 {md_file_path} 去重后提取到 {len(match_results)} 个标准号")
+
                 table_results = []
-                for code in extracted_codes:
-                    match_result = comparator.compare(code)
+                for match_result in match_results:
                     result_dict = match_result.to_dict()
                     
                     # 添加文件信息

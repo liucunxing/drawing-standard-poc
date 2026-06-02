@@ -155,6 +155,39 @@ class StandardCodeExtractor:
         re.IGNORECASE
     )
 
+    # ============================================================
+    # 合并标准号正则表达式 - 匹配含波浪线(~)的范围格式
+    # ============================================================
+    # 支持格式:
+    #   NB/T 47013.1~47013.5-2015          (范围展开为 .1,.2,.3,.4,.5)
+    #   GB/T 150.1~GB/T 150.4-2011         (前缀重复的范围格式)
+    #   NB/T47018.1~47018.3.47018.5-2017   (范围+点号分隔额外项, OCR变体)
+    #   NB/T 47018.1~47018.3,47018.5-2017  (范围+逗号分隔额外项)
+    _pn = _prefix_pattern  # shorthand for prefix pattern
+
+    # Pattern A: 前缀在波浪号后重复 (如 GB/T 150.1~GB/T 150.4-2011)
+    MERGED_RANGE_REPEATED = re.compile(
+        r'\b(' + _pn + r')\s*'
+        r'(\d+)\.(\d+)\s*~\s*'
+        r'(?:' + _pn + r')\s*'
+        r'(\d+)\.(\d+)'
+        r'((?:[,，]\s*(?:' + _pn + r')?\s*\d+\.\d+|[,，.]\s*\d+\.\d+)*)'
+        r'\s*[-–—]\s*'
+        r'(\d{4})\b',
+        re.IGNORECASE
+    )
+
+    # Pattern B: 前缀不重复 (如 NB/T 47013.1~47013.5-2015)
+    MERGED_RANGE_SIMPLE = re.compile(
+        r'\b(' + _pn + r')\s*'
+        r'(\d+)\.(\d+)\s*~\s*'
+        r'(\d+)\.(\d+)'
+        r'((?:[,，]\s*(?:' + _pn + r')?\s*\d+\.\d+|[,，.]\s*\d+\.\d+)*)'
+        r'\s*[-–—]\s*'
+        r'(\d{4})\b',
+        re.IGNORECASE
+    )
+
     def extract_from_markdown(self, markdown_text: str) -> List[Dict]:
         """
         从 Markdown 文本中提取标准编号（核心入口方法）
@@ -202,11 +235,12 @@ class StandardCodeExtractor:
         从表格数据中提取标准编号
         
         处理逻辑:
-        遍历表格的每一行每一列，对每个单元格的内容使用正则表达式匹配标准编号格式
-        如果匹配成功，解析匹配结果并记录位置信息（行号、列号）
+        遍历表格的每一行每一列，对每个单元格的内容：
+        1. 先尝试匹配合并标准号格式（含波浪线~的范围格式），拆分后逐个添加
+        2. 再使用标准正则匹配单个标准编号，跳过已被合并匹配覆盖的位置
         
         Args:
-            table_data: 表格数据，二维列表结构 [[row1_col1, row1_col2], [row2_col1, row2_col2], ...]
+            table_data: 表格数据，二维列表结构 [[row1_col1, row1_col2], ...]
             
         Returns:
             提取的标准编号列表，每个元素包含匹配信息和位置信息
@@ -215,11 +249,24 @@ class StandardCodeExtractor:
 
         for row_idx, row in enumerate(table_data):
             for col_idx, cell in enumerate(row):
-                matches = self.STANDARD_PATTERN.finditer(cell)
-                for match in matches:
-                    code_info = self._parse_match(match, row_idx, col_idx, cell)
-                    if code_info:
-                        results.append(code_info)
+                # 先尝试提取合并标准号 (含~范围格式)
+                merged = self._extract_merged(cell, row_idx, col_idx, cell)
+                if merged:
+                    results.extend(merged)
+
+                # 记录合并匹配覆盖的字符位置，用于避免重复
+                covered = set()
+                for m in self.MERGED_RANGE_REPEATED.finditer(cell):
+                    covered.update(range(m.start(), m.end()))
+                for m in self.MERGED_RANGE_SIMPLE.finditer(cell):
+                    covered.update(range(m.start(), m.end()))
+
+                # 普通单个标准号匹配 (跳过已被合并匹配覆盖的)
+                for match in self.STANDARD_PATTERN.finditer(cell):
+                    if match.start() not in covered:
+                        code_info = self._parse_match(match, row_idx, col_idx, cell)
+                        if code_info:
+                            results.append(code_info)
 
         return results
 
@@ -229,6 +276,8 @@ class StandardCodeExtractor:
         
         处理逻辑:
         当输入文本不是 HTML 表格格式时，直接在整个文本中搜索标准编号
+        1. 先尝试匹配合并标准号格式（含波浪线~的范围格式），拆分后逐个添加
+        2. 再使用标准正则匹配单个标准编号，跳过已被合并匹配覆盖的位置
         不使用行号列号定位，统一标记为 row=0, col=0
         
         Args:
@@ -239,11 +288,24 @@ class StandardCodeExtractor:
         """
         results = []
 
-        matches = self.STANDARD_PATTERN.finditer(text)
-        for match in matches:
-            code_info = self._parse_match(match, 0, 0, text)
-            if code_info:
-                results.append(code_info)
+        # 先尝试提取合并标准号 (含~范围格式)
+        merged = self._extract_merged(text, 0, 0, text)
+        if merged:
+            results.extend(merged)
+
+        # 记录合并匹配覆盖的字符位置，用于避免重复
+        covered = set()
+        for m in self.MERGED_RANGE_REPEATED.finditer(text):
+            covered.update(range(m.start(), m.end()))
+        for m in self.MERGED_RANGE_SIMPLE.finditer(text):
+            covered.update(range(m.start(), m.end()))
+
+        # 普通单个标准号匹配 (跳过已被合并匹配覆盖的)
+        for match in self.STANDARD_PATTERN.finditer(text):
+            if match.start() not in covered:
+                code_info = self._parse_match(match, 0, 0, text)
+                if code_info:
+                    results.append(code_info)
 
         return results
 
@@ -295,6 +357,97 @@ class StandardCodeExtractor:
             'standard_type': found_prefix
         }
 
+    @staticmethod
+    def _split_merged_standards(text: str) -> List[str]:
+        """
+        拆分合并标准号为独立标准号列表
+
+        支持格式:
+        - NB/T 47013.1~47013.5-2015 → 5个独立标准号
+        - GB/T 150.1~GB/T 150.4-2011 → 4个独立标准号
+        - NB/T47018.1~47018.3.47018.5-2017 → 4个独立标准号 (范围+额外项)
+        - NB/T 47018.1~47018.3,47018.5-2017 → 4个独立标准号 (范围+逗号分隔)
+
+        Args:
+            text: 可能包含合并标准号的文本
+
+        Returns:
+            拆分后的独立标准号字符串列表；如果没有合并标准号则返回空列表
+        """
+        results = []
+        _prefix_pattern = StandardCodeExtractor._prefix_pattern
+
+        # 先尝试 Pattern A (前缀重复), 再尝试 Pattern B (前缀不重复)
+        for pattern in [StandardCodeExtractor.MERGED_RANGE_REPEATED,
+                        StandardCodeExtractor.MERGED_RANGE_SIMPLE]:
+            for match in pattern.finditer(text):
+                prefix = match.group(1).strip()
+                main_num = match.group(2).strip()
+                start_sub = int(match.group(3))
+                end_main_num = match.group(4).strip()
+                end_sub = int(match.group(5))
+                extras_raw = match.group(6) if match.group(6) else ''
+                year = match.group(7)
+
+                # 标准化前缀 (与 VALID_PREFIXES 匹配)
+                prefix_upper = prefix.upper()
+                found_prefix = prefix  # default
+                for vp in StandardCodeExtractor.VALID_PREFIXES:
+                    if vp.upper() == prefix_upper:
+                        found_prefix = vp
+                        break
+
+                # 展开范围: start_sub 到 end_sub
+                for sub in range(start_sub, end_sub + 1):
+                    std_code = f"{found_prefix} {main_num}.{sub}-{year}"
+                    results.append(std_code)
+
+                # 解析额外项 (逗号/点号分隔的子标准号)
+                if extras_raw:
+                    # 使用 findall 匹配完整的 number.sub 项
+                    # 而不是按单个字符分割 (避免把 47018.5 拆成 47018 和 5)
+                    # 格式: [prefix]number.sub 或 .sub
+                    items = re.findall(
+                        r'(?:' + _prefix_pattern + r')?\s*'
+                        r'\d+\.(\d+)',
+                        extras_raw, re.IGNORECASE
+                    )
+                    for sub_str in items:
+                        if sub_str:
+                            sub_num = int(sub_str)
+                            std_code = f"{found_prefix} {main_num}.{sub_num}-{year}"
+                            results.append(std_code)
+
+        return results
+
+    def _extract_merged(self, text: str, row_idx: int, col_idx: int,
+                        cell_text: str) -> List[Dict]:
+        """
+        尝试从文本中提取合并标准号并拆分为独立条目
+
+        对每个拆分后的标准号使用 STANDARD_PATTERN 解析，
+        确保输出格式与 _parse_match 一致。
+
+        Args:
+            text: 单元格或文本内容
+            row_idx: 行号
+            col_idx: 列号
+            cell_text: 单元格原始文本
+
+        Returns:
+            拆分后的标准编号信息字典列表
+        """
+        split_codes = self._split_merged_standards(text)
+        results = []
+        for code_str in split_codes:
+            m = self.STANDARD_PATTERN.search(code_str)
+            if m:
+                info = self._parse_match(m, row_idx, col_idx, cell_text)
+                if info:
+                    info['original_merged'] = text.strip()
+                    results.append(info)
+        return results
+
     def extract_unique_codes(self, markdown_text: str) -> List[str]:
         """
         提取唯一的标准编号列表（去重）
@@ -311,9 +464,39 @@ class StandardCodeExtractor:
         Returns:
             去重后的标准编号字符串列表，按字母顺序排序
         """
-        extracted = self.extract_from_markdown(markdown_text)
+        extracted = self.extract_unique_matches(markdown_text)
         unique_codes = list(set([e['full_match'] for e in extracted]))
         return sorted(unique_codes)
+
+    def extract_unique_matches(self, markdown_text: str) -> List[Dict]:
+        """
+        提取去重后的标准编号明细（保留首次出现顺序）
+
+        去重键使用 prefix + number + year，避免同一个 md 中相同规格号重复参与标准库比对。
+
+        Args:
+            markdown_text: Markdown 表格文本
+
+        Returns:
+            去重后的标准编号明细列表
+        """
+        extracted = self.extract_from_markdown(markdown_text)
+        unique_matches = []
+        seen_keys = set()
+
+        for item in extracted:
+            unique_key = (
+                item.get('prefix', '').upper(),
+                str(item.get('number', '')).strip(),
+                str(item.get('year', '')).strip(),
+            )
+            if unique_key in seen_keys:
+                continue
+
+            seen_keys.add(unique_key)
+            unique_matches.append(item)
+
+        return unique_matches
 
 
 
@@ -779,7 +962,7 @@ class StandardCodeComparator:
         批量比对 Markdown 文本中的所有标准编号
         
         处理逻辑:
-        1. 调用 extractor 从 Markdown 中提取所有标准编号
+        1. 调用 extractor 从 Markdown 中提取并去重标准编号
         2. 对每个提取的标准编号调用 compare 方法进行比对
         3. 收集所有比对结果并返回
 
@@ -789,7 +972,7 @@ class StandardCodeComparator:
         Returns:
             比对结果列表，每个元素是一个 MatchResult 对象
         """
-        extracted_codes = self.extractor.extract_from_markdown(markdown_text)
+        extracted_codes = self.extractor.extract_unique_matches(markdown_text)
 
         results = []
         for code in extracted_codes:

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Tuple
 from uuid import uuid4
 
 import fitz
+import numpy as np
 from PIL import Image, ImageDraw
 
 # ============================================
@@ -64,9 +65,9 @@ class TableLayoutService4Batch:
         self.layout_model_name = os.getenv("PADDLEOCR_LAYOUT_MODEL_NAME", "PP-DocLayout_plus-L")
         self.layout_model_dir = self._resolve_layout_model_dir()
 
-        self.default_render_zoom = float(os.getenv("PADDLEOCR_VL_RENDER_ZOOM", "3.2"))
+        self.default_render_zoom = float(os.getenv("PADDLEOCR_VL_RENDER_ZOOM", "4.17"))
         self.default_max_pages = int(os.getenv("PADDLEOCR_VL_MAX_PAGES", "1"))
-        self.infer_max_side = int(os.getenv("PADDLEOCR_VL_INFER_MAX_SIDE", "3200"))
+        self.infer_max_side = int(os.getenv("PADDLEOCR_VL_INFER_MAX_SIDE", "2900"))
 
         self.use_doc_orientation_classify = self._read_bool_env(
             "PADDLEOCR_VL_USE_DOC_ORIENTATION_CLASSIFY",
@@ -696,6 +697,7 @@ class TableLayoutService4Batch:
             return []
 
         image = Image.open(page_image_path).convert("RGB")
+        gray = np.array(image.convert("L"))
         width, height = image.size
         out_dir.mkdir(parents=True, exist_ok=True)
         # Remove stale crops from previous runs in the same folder.
@@ -719,6 +721,7 @@ class TableLayoutService4Batch:
             if bbox is None:
                 continue
             x1, y1, x2, y2 = bbox
+            y1 = self._expand_table_top_to_boundary(gray, x1, y1, x2, y2)
             if x2 - x1 < 20 or y2 - y1 < 20:
                 continue
 
@@ -735,9 +738,93 @@ class TableLayoutService4Batch:
                 page_idx=page_idx,
                 table_index=table_index,
             )
+            if sub_table_paths:
+                table_paths.pop()
+                try:
+                    crop_path.unlink()
+                except Exception:
+                    pass
             table_paths.extend(sub_table_paths)
 
         return table_paths
+
+    def _expand_table_top_to_boundary(self, gray: Any, x1: int, y1: int, x2: int, y2: int) -> int:
+        if y1 <= 0 or x2 - x1 < 40 or y2 - y1 < 40:
+            return y1
+
+        box_h = y2 - y1
+        max_expand = min(y1, max(36, int(box_h * 0.22)))
+        search_top = max(0, y1 - max_expand)
+        if search_top >= y1:
+            return y1
+
+        x_pad = max(2, int((x2 - x1) * 0.03))
+        sx1 = max(0, x1 + x_pad)
+        sx2 = min(gray.shape[1], x2 - x_pad)
+        if sx2 - sx1 < 20:
+            sx1 = max(0, x1)
+            sx2 = min(gray.shape[1], x2)
+        if sx2 - sx1 < 20:
+            return y1
+
+        strip = gray[search_top:y1, sx1:sx2]
+        if strip.size == 0:
+            return y1
+
+        ink = strip < 232
+        row_density = ink.mean(axis=1)
+        if row_density.size < 6:
+            return y1
+
+        smooth_density = np.convolve(row_density, np.ones(5, dtype=float) / 5.0, mode="same")
+        content_threshold = 0.006
+        near_bottom_window = smooth_density[max(0, len(smooth_density) - 24):]
+        if near_bottom_window.size == 0 or float(near_bottom_window.max()) < content_threshold:
+            return y1
+
+        content_spans = self._mask_to_spans(smooth_density > content_threshold)
+        if not content_spans:
+            return y1
+
+        bottom_span = None
+        lower_bound = len(smooth_density) - 24
+        for start, end in reversed(content_spans):
+            if end >= lower_bound:
+                bottom_span = (start, end)
+                break
+        if bottom_span is None:
+            return y1
+
+        boundary_end = bottom_span[0]
+        if boundary_end <= 0:
+            return y1
+
+        boundary_density = smooth_density[:boundary_end]
+        if boundary_density.size == 0:
+            return max(search_top, y1 - 8)
+
+        max_density = float(boundary_density.max()) if boundary_density.size else 0.0
+        line_threshold = max(0.16, min(0.72, max_density * 0.72)) if max_density > 0 else 0.16
+        line_spans = [
+            (start, end)
+            for start, end in self._mask_to_spans(boundary_density >= line_threshold)
+            if (end - start) >= 2
+        ]
+        if line_spans:
+            line_start, _ = line_spans[-1]
+            return max(0, search_top + line_start)
+
+        blank_threshold = max(0.0, min(0.03, float(np.percentile(boundary_density, 25))))
+        blank_spans = [
+            (start, end)
+            for start, end in self._mask_to_spans(boundary_density <= blank_threshold)
+            if (end - start) >= 4
+        ]
+        if blank_spans:
+            _, blank_end = blank_spans[-1]
+            return max(0, search_top + blank_end)
+
+        return max(0, search_top + max(0, bottom_span[0] - 4))
 
     def _scale_boxes_to_output(
             self,
@@ -819,7 +906,7 @@ class TableLayoutService4Batch:
             table_index: int,
     ) -> List[str]:
         """
-        管口表切割：对于超长表格（长宽比>2.0），固定按 70% 切割，只输出上部。
+        管口表切割：对于超长表格（长宽比>2.0），按 50% 目标位寻找安全切点并保留上下两部分。
 
         Args:
             table_image_path: 一级裁剪的表格图片路径
@@ -846,32 +933,90 @@ class TableLayoutService4Batch:
 
             print(
                 f"[testP] [管口表检测] page_{page_idx:03d}_table_{table_index:03d}: "
-                f"长宽比 {aspect_ratio:.2f}，按 70% 固定比例切割"
+                f"长宽比 {aspect_ratio:.2f}，按 50% 目标位寻找安全横线切割"
             )
 
-            # 2. 固定按 66% 切割，只输出上部
-            split_y = int(height * 0.66)
+            # 2. 以 50% 为目标位，优先沿横线切割，避免截断首尾行文字
+            split_y = self._find_safe_horizontal_split(img, target_ratio=0.5)
+            if split_y is None:
+                split_y = int(height * 0.5)
+                print(
+                    f"[testP] [管口表检测] page_{page_idx:03d}_table_{table_index:03d}: "
+                    f"未找到可靠横线，回退到 50% 固定切割 (split_y={split_y})"
+                )
 
-            # 创建输出目录
-            sub_dir = out_dir / f"page_{page_idx:03d}_table_{table_index:03d}_fixed_70"
-            sub_dir.mkdir(parents=True, exist_ok=True)
-
-            # 只保存上部 70%
-            upper_path = sub_dir / f"page_{page_idx:03d}_table_{table_index:03d}_upper.png"
-            img.crop((0, 0, width, split_y)).save(upper_path)
-
-            print(
-                f"[testP] [管口表检测] page_{page_idx:03d}_table_{table_index:03d}: "
-                f"成功切割，仅输出上部 70% (split_y={split_y})"
+            return self._save_split_tables(
+                img=img,
+                width=width,
+                height=height,
+                split_y=split_y,
+                out_dir=out_dir,
+                page_idx=page_idx,
+                table_index=table_index,
+                method="safe50",
             )
-
-            return [str(upper_path)]
 
         except Exception as exc:
             print(f"[testP] [管口表检测] page_{page_idx:03d}_table_{table_index:03d}: 失败 - {exc}")
             import traceback
             traceback.print_exc()
             return []
+
+    def _find_safe_horizontal_split(self, img: Image.Image, target_ratio: float = 0.5) -> int | None:
+        gray = np.array(img.convert("L"))
+        if gray.size == 0:
+            return None
+
+        height, width = gray.shape
+        if width < 80 or height < 120:
+            return None
+
+        ink = gray < 232
+        row_density = ink.mean(axis=1)
+        if row_density.size == 0:
+            return None
+
+        target_y = int(height * target_ratio)
+        search_margin = max(40, int(height * 0.18))
+        search_start = max(0, target_y - search_margin)
+        search_end = min(height, target_y + search_margin)
+        if search_end - search_start < 10:
+            return None
+
+        smooth_density = np.convolve(row_density, np.ones(5, dtype=float) / 5.0, mode="same")
+        search_density = smooth_density[search_start:search_end]
+        if search_density.size == 0:
+            return None
+
+        max_density = float(search_density.max())
+        if max_density > 0:
+            line_threshold = max(0.18, min(0.72, max_density * 0.72))
+            line_spans = [
+                (start + search_start, end + search_start)
+                for start, end in self._mask_to_spans(search_density >= line_threshold)
+                if (end - start) >= 2
+            ]
+            if line_spans:
+                best_start, best_end = min(
+                    line_spans,
+                    key=lambda span: abs(((span[0] + span[1]) // 2) - target_y),
+                )
+                return min(height - 1, max(1, best_end))
+
+        blank_threshold = max(0.0, min(0.03, float(np.percentile(search_density, 25))))
+        blank_spans = [
+            (start + search_start, end + search_start)
+            for start, end in self._mask_to_spans(search_density <= blank_threshold)
+            if (end - start) >= 4
+        ]
+        if not blank_spans:
+            return None
+
+        best_start, best_end = min(
+            blank_spans,
+            key=lambda span: abs(((span[0] + span[1]) // 2) - target_y),
+        )
+        return min(height - 1, max(1, (best_start + best_end) // 2))
 
     def _save_split_tables(
             self,
@@ -905,19 +1050,15 @@ class TableLayoutService4Batch:
             print(f"[testP] [管口表检测] 切割位置不合理: {split_y}/{height}，跳过")
             return []
 
-        # 创建输出目录
-        sub_dir = out_dir / f"page_{page_idx:03d}_table_{table_index:03d}_{method}"
-        sub_dir.mkdir(parents=True, exist_ok=True)
-
         sub_table_paths: List[str] = []
 
         # 上部：标题区域（不包含管口表标题）
-        upper_path = sub_dir / f"page_{page_idx:03d}_table_{table_index:03d}_upper.png"
+        upper_path = out_dir / f"page_{page_idx:03d}_table_{table_index:03d}_{method}_upper.png"
         img.crop((0, 0, width, split_y)).save(upper_path)
         sub_table_paths.append(str(upper_path))
 
         # 下部：数据区域（包含管口表标题）
-        lower_path = sub_dir / f"page_{page_idx:03d}_table_{table_index:03d}_lower.png"
+        lower_path = out_dir / f"page_{page_idx:03d}_table_{table_index:03d}_{method}_lower.png"
         img.crop((0, split_y, width, height)).save(lower_path)
         sub_table_paths.append(str(lower_path))
 
@@ -954,9 +1095,9 @@ if __name__ == "__main__":
 
     result = service.run_multi_combo_experiment(
         pdf_path=local_pdf,
-        zoom_values=[4.17],
-        infer_max_side_values=[2900],
-        max_pages=1,
+        zoom_values=[3.2], #[4.17],
+        infer_max_side_values=[2800],#[2900],
+        max_pages=1
     )
 
     print("\n[testP] done")

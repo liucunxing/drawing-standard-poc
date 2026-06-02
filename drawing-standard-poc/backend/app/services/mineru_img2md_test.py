@@ -9,7 +9,7 @@ MinerU 图片转 Markdown 最佳方案
 
 预处理方案: smart_dilate_v2 (智能膨胀 - 保留表格线版本)
 - DPI: 300
-- 膨胀核: 2x2 (增加字符间距,解决字符粘连问题)
+- 膨胀核: 1x2 (横向轻微拉开字符间距,缓解 1 和 N 粘连)
 - 表格线处理: 先膨胀后腐蚀恢复 (在字符和表格线之间制造间隙,避免误识别)
 - 缩放: 1.5x (提高图像分辨率,增强 OCR 识别精度)
 
@@ -33,22 +33,24 @@ os.environ['MINERU_MODEL_SOURCE'] = 'local'
 os.environ['MINERU_TABLE_MODEL'] = 'struct_eqtable'
 
 
-def _normalize_hg_prefix_in_text(text):
-    """Normalize HG/HO/HC variants to HG/T for flange standard references."""
+def _normalize_standard_prefix_in_text(text):
+    """Normalize common OCR prefix variants like HG/* and NB/* to the expected standard forms."""
     if not isinstance(text, str) or not text:
         return text
-    # HG/* or HO/* or HC/* prefix variants + digits -> HG/T + digits
-    return re.sub(r"H[GOC]/[TI1l](?=\s*\d)", "HG/T", text)
+    normalized = re.sub(r"H[GOC]/[TI1l](?=\s*\d)", "HG/T", text)
+    normalized = re.sub(r"NB/[I1l](?=\s*(?:\d|$))", "NB/T", normalized)
+    normalized = re.sub(r"NB/(?=\s*(?:\d|$))", "NB/T", normalized)
+    return normalized
 
 
 def _apply_flange_standard_patch_md(md_content):
-    """Patch markdown: always replace □->口, and normalize HG variants in 法兰标准 context."""
+    """Patch markdown: always replace □->口, and normalize standard prefixes in 法兰标准 context."""
     if not isinstance(md_content, str) or not md_content:
         return md_content, False
 
     patched = md_content.replace("□", "口")
     if "法兰标准" in patched:
-        patched = _normalize_hg_prefix_in_text(patched)
+        patched = _normalize_standard_prefix_in_text(patched)
 
     return patched, patched != md_content
 
@@ -69,7 +71,7 @@ def _patch_json_strings(obj):
     if isinstance(obj, list):
         return [_patch_json_strings(v) for v in obj]
     if isinstance(obj, str):
-        return _normalize_hg_prefix_in_text(obj)
+        return _normalize_standard_prefix_in_text(obj)
     return obj
 
 
@@ -150,19 +152,19 @@ def _should_split_image(image_path, resized_image, size_mb_threshold=1.0, height
     }
 
 
-def smart_dilate_v2(image, dilate_kernel=(2, 2)):
+def smart_dilate_v2(image, dilate_kernel=(1, 2)):
     """
     智能膨胀 V2:先膨胀,再修复表格线
     
     作用:
-    1. 对整个图像进行膨胀(2x2核),增加字符间距,解决字符粘连问题(如 1N 粘连)
+    1. 对整个图像进行横向轻微膨胀(1x2核),增加横向字符间距,缓解字符粘连问题(如 1N 粘连)
     2. 检测膨胀后的表格线(水平线 >= 40px,垂直线 >= 40px)
     3. 腐蚀表格线恢复原始宽度,在字符和表格线之间制造微小间隙
     4. 避免 OCR 将紧贴表格线的字符(如 H)误识别为表格线的一部分
     
     参数:
         image: PIL Image 对象
-        dilate_kernel: 膨胀核大小,默认 (2, 2)
+        dilate_kernel: 膨胀核大小,默认 (1, 2)
     
     返回:
         PIL Image: 预处理后的图像
@@ -192,7 +194,7 @@ def smart_dilate_v2(image, dilate_kernel=(2, 2)):
     table_lines = cv2.add(horizontal_lines, vertical_lines)
     
     # 步骤3: 腐蚀表格线,恢复原始宽度
-    # 作用:因为膨胀核是 2x2,表格线会变粗 2 像素,腐蚀掉 1 像素来恢复接近原始宽度
+    # 作用:膨胀后表格线可能变粗,腐蚀掉 1 像素来恢复接近原始宽度
     # 这样可以在字符和表格线之间制造微小间隙,避免 OCR 误识别
     erode_kernel = np.ones((2, 2), np.uint8)
     restored_lines = cv2.erode(table_lines, erode_kernel, iterations=1)
@@ -255,7 +257,7 @@ def image_to_markdown(
         image = Image.open(BytesIO(image_bytes)).convert("RGB")
         
         # 步骤2: 智能膨胀预处理
-        processed_image = smart_dilate_v2(image, dilate_kernel=(2, 2))
+        processed_image = smart_dilate_v2(image, dilate_kernel=(1, 2))
         
         # 步骤3: 缩放(提高分辨率,增强 OCR 识别精度)
         resized_size = (
