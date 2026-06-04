@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime
+import getpass
 from pathlib import Path
+import re
 import time
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 
 import requests
@@ -23,6 +26,8 @@ FAILED_STATUSES = {"异常", "失败"}
 
 # 后端API配置
 BACKEND_BASE_URL = "http://localhost:8000"  # FastAPI后端地址
+BACKEND_TMP_DIR = Path(__file__).resolve().parent / "drawing-standard-poc" / "backend" / "tmp"
+STANDARD_LIBRARY_OPERATOR = "ADMIN"
 
 
 # Future OCR backend responses should follow this shape. The Streamlit page does
@@ -314,9 +319,191 @@ def detect_standards_from_backend(task_id: str, markdown_files: list) -> dict[st
         }
 
 
-def parse_created_at(value: str) -> datetime:
+def get_task_status_from_backend(task_id: str) -> dict[str, Any]:
     try:
-        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        response = requests.get(
+            f"{BACKEND_BASE_URL}/api/drawing/task/{task_id}",
+            timeout=5,
+        )
+
+        result = response.json()
+        if result.get("code") == 200:
+            return {
+                "success": True,
+                "data": result.get("data", {}),
+            }
+        return {
+            "success": False,
+            "data": None,
+            "message": result.get("msg", "查询失败"),
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "data": None,
+            "message": f"查询异常: {str(exc)}",
+        }
+
+
+def list_tasks_from_backend(limit: int = 50) -> dict[str, Any]:
+    try:
+        response = requests.get(
+            f"{BACKEND_BASE_URL}/api/drawing/tasks",
+            params={"limit": limit},
+            timeout=5,
+        )
+
+        result = response.json()
+        if result.get("code") == 200:
+            return {
+                "success": True,
+                "data": result.get("data", []),
+            }
+        return {
+            "success": False,
+            "data": None,
+            "message": result.get("msg", "查询失败"),
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "data": None,
+            "message": f"查询异常: {str(exc)}",
+        }
+
+
+def list_standard_data_from_backend(keyword: str = "", page: int = 1, page_size: int = 20) -> dict[str, Any]:
+    try:
+        response = requests.get(
+            f"{BACKEND_BASE_URL}/api/standard-data",
+            params={
+                "keyword": keyword,
+                "page": page,
+                "page_size": page_size,
+            },
+            timeout=8,
+        )
+        result = response.json()
+        if result.get("code") == 200:
+            return {"success": True, "data": result.get("data", {})}
+        return {"success": False, "data": None, "message": result.get("msg", "查询失败")}
+    except Exception as exc:
+        return {"success": False, "data": None, "message": f"查询异常: {str(exc)}"}
+
+
+def create_standard_data_from_backend(
+    standard_no: str,
+    standard_type: str,
+    standard_prefix: str,
+    operator: str = STANDARD_LIBRARY_OPERATOR,
+) -> dict[str, Any]:
+    try:
+        response = requests.post(
+            f"{BACKEND_BASE_URL}/api/standard-data",
+            json={
+                "standard_no": standard_no,
+                "standard_type": standard_type,
+                "standard_prefix": standard_prefix,
+                "operator": operator,
+            },
+            timeout=8,
+        )
+        result = response.json()
+        if result.get("code") == 200:
+            return {"success": True, "data": result.get("data", {})}
+        return {"success": False, "data": None, "message": result.get("msg", "新增失败")}
+    except Exception as exc:
+        return {"success": False, "data": None, "message": f"新增异常: {str(exc)}"}
+
+
+def update_standard_data_from_backend(
+    standard_id: int,
+    standard_no: str,
+    standard_type: str,
+    standard_prefix: str,
+    operator: str = STANDARD_LIBRARY_OPERATOR,
+) -> dict[str, Any]:
+    try:
+        response = requests.put(
+            f"{BACKEND_BASE_URL}/api/standard-data/{standard_id}",
+            json={
+                "standard_no": standard_no,
+                "standard_type": standard_type,
+                "standard_prefix": standard_prefix,
+                "operator": operator,
+            },
+            timeout=8,
+        )
+        result = response.json()
+        if result.get("code") == 200:
+            return {"success": True, "data": result.get("data", {})}
+        return {"success": False, "data": None, "message": result.get("msg", "更新失败")}
+    except Exception as exc:
+        return {"success": False, "data": None, "message": f"更新异常: {str(exc)}"}
+
+
+def delete_standard_data_from_backend(standard_id: int) -> dict[str, Any]:
+    try:
+        response = requests.delete(
+            f"{BACKEND_BASE_URL}/api/standard-data/{standard_id}",
+            timeout=8,
+        )
+        result = response.json()
+        if result.get("code") == 200:
+            return {"success": True}
+        return {"success": False, "message": result.get("msg", "删除失败")}
+    except Exception as exc:
+        return {"success": False, "message": f"删除异常: {str(exc)}"}
+
+
+def detect_default_operator() -> str:
+    try:
+        value = (getpass.getuser() or "").strip()
+        return value or "UNKNOWN"
+    except Exception:
+        return "UNKNOWN"
+
+
+def format_datetime_text(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    text = str(value).replace("T", " ")
+    return text[:19] if len(text) >= 19 else text
+
+
+def format_date_only_text(value: Any) -> str:
+    text = format_datetime_text(value)
+    if not text:
+        return "无"
+    return text[:10] if len(text) >= 10 else text
+
+
+def normalize_task_status(status: Any, current_step: str = "") -> str:
+    if isinstance(status, str):
+        return status or "处理中"
+    if status in (3, 4):
+        return "失败"
+    if status == 2 and current_step == "标准检测完成":
+        return "已完成"
+    return "处理中"
+
+
+def normalize_pdf_status(status: Any, current_step: str = "") -> str:
+    if status in (3, 4):
+        return "失败"
+    if current_step in {"解析完成", "解析完成，等待检验", "标准检测完成"} or status == 2:
+        return "识别成功"
+    if status == 1:
+        return "处理中"
+    return "排队中"
+
+
+def parse_created_at(value: str) -> datetime:
+    normalized = format_datetime_text(value)
+    try:
+        return datetime.strptime(normalized, "%Y-%m-%d %H:%M:%S")
     except ValueError:
         return datetime.min
 
@@ -345,6 +532,11 @@ def normalize_table(table: dict[str, Any], fallback_index: int) -> dict[str, Any
         "score": table.get("score", table.get("confidence", 0.0)),
         "bbox": table.get("bbox", []),
         "image_path": table.get("image_path") or table.get("crop_path") or "",
+        "image_url": table.get("image_url") or "",
+        "raw_markdown_content": table.get("raw_markdown_content") or "",
+        "markdown_content": table.get("markdown_content") or "",
+        "highlighted_markdown_content": table.get("highlighted_markdown_content") or "",
+        "markdown_path": table.get("markdown_path") or "",
     }
 
 
@@ -391,6 +583,8 @@ def normalize_pdf(
 
 def normalize_task_detail(source: dict[str, Any]) -> dict[str, Any]:
     data = source.get("data", source)
+    current_step = data.get("current_step") or ""
+    status_text = normalize_task_status(data.get("status"), current_step)
     tables = [
         normalize_table(table, index)
         for index, table in enumerate(data.get("tables", []), start=1)
@@ -402,23 +596,32 @@ def normalize_task_detail(source: dict[str, Any]) -> dict[str, Any]:
         pdf.get("pdf_name") or pdf.get("file_name") or pdf.get("name") or ""
         for pdf in source_pdfs
     ]
+    if not file_names and data.get("original_filename"):
+        file_names = [data.get("original_filename")]
     if not source_pdfs and file_names:
-        source_pdfs = [{"pdf_name": file_name, "status": "排队中"} for file_name in file_names]
+        pdf_status = normalize_pdf_status(data.get("status"), current_step)
+        source_pdfs = [{"pdf_name": file_name, "status": pdf_status} for file_name in file_names]
 
     pdfs = [normalize_pdf(pdf, tables, standards) for pdf in source_pdfs]
     return {
         "task_id": data.get("task_id") or f"TASK-{datetime.now():%Y%m%d}-{uuid4().hex[:4].upper()}",
-        "task_name": data.get("task_name") or "未命名识别任务",
+        "task_name": data.get("task_name") or data.get("original_filename") or data.get("task_id") or "未命名识别任务",
         "description": data.get("description") or "",
         "file_names": file_names or [pdf["pdf_name"] for pdf in pdfs],
+        "original_filename": data.get("original_filename") or (file_names[0] if file_names else ""),
         "pdfs": pdfs,
         "tables": tables,
         "standards": standards,
+        "overall_standard_compare": data.get("overall_standard_compare") or {},
         "raw_json": data.get("raw_json") or stable_raw_json(source),
-        "status": data.get("status") or "处理中",
-        "created_at": data.get("created_at") or now_text(),
+        "status": status_text,
+        "current_step": current_step or "文件已上传,等待解析",
+        "created_at": format_datetime_text(data.get("created_at")) or now_text(),
+        "started_at": format_datetime_text(data.get("started_at")),
+        "completed_at": format_datetime_text(data.get("completed_at")),
+        "backend_status": data.get("status"),
         "processed_count": data.get("processed_count"),
-        "pdf_count": data.get("pdf_count", data.get("total_pdfs")),
+        "pdf_count": data.get("pdf_count", data.get("total_pdfs")) or len(pdfs),
         "table_count": data.get("table_count", data.get("total_tables")),
         "standard_count": data.get("standard_count", data.get("total_standards")),
         "review_count": data.get("review_count"),
@@ -454,15 +657,102 @@ def normalize_task_summary(detail: dict[str, Any]) -> dict[str, Any]:
         "task_id": detail["task_id"],
         "task_name": detail["task_name"],
         "description": detail["description"],
+        "original_filename": detail.get("original_filename") or (detail.get("file_names") or [""])[0],
         "pdf_count": detail.get("pdf_count") or len(detail["pdfs"]),
         "processed_count": processed_count(detail),
         "table_count": table_total if table_total is not None else len(detail["tables"]),
         "standard_count": standard_total if standard_total is not None else len(detail["standards"]),
         "review_count": review_count(detail),
         "status": detail["status"],
+        "current_step": detail.get("current_step", ""),
         "created_at": detail["created_at"],
+        "started_at": detail.get("started_at", ""),
+        "completed_at": detail.get("completed_at", ""),
         "file_names": detail["file_names"],
     }
+
+
+def merge_backend_task_detail(
+    existing_detail: dict[str, Any] | None,
+    backend_task: dict[str, Any],
+) -> dict[str, Any]:
+    backend_detail = normalize_task_detail(backend_task)
+    if not existing_detail:
+        return backend_detail
+
+    merged = deepcopy(backend_detail)
+    merged["task_name"] = existing_detail.get("task_name") or backend_detail["task_name"]
+    merged["description"] = existing_detail.get("description") or backend_detail["description"]
+    merged["file_names"] = existing_detail.get("file_names") or backend_detail["file_names"]
+    merged["pdfs"] = backend_detail["pdfs"] or existing_detail.get("pdfs", [])
+    merged["tables"] = backend_detail["tables"] or existing_detail.get("tables", [])
+    merged["standards"] = backend_detail["standards"] or existing_detail.get("standards", [])
+    merged["overall_standard_compare"] = (
+        backend_detail.get("overall_standard_compare")
+        or existing_detail.get("overall_standard_compare", {})
+    )
+    merged["raw_json"] = existing_detail.get("raw_json") or backend_detail["raw_json"]
+    if existing_detail.get("backend_file_path"):
+        merged["backend_file_path"] = existing_detail["backend_file_path"]
+    return merged
+
+
+def refresh_single_task_detail_from_backend(task_id: str) -> bool:
+    result = get_task_status_from_backend(task_id)
+    if not result.get("success"):
+        return False
+
+    backend_data = result.get("data") or {}
+    existing_detail = st.session_state.get("task_details", {}).get(task_id)
+    merged = merge_backend_task_detail(existing_detail, backend_data)
+    st.session_state.task_details[task_id] = merged
+    upsert_task_summary(normalize_task_summary(merged))
+    return True
+
+
+def sync_tasks_from_backend(limit: int = 50) -> bool:
+    tasks_result = list_tasks_from_backend(limit=limit)
+    backend_rows = tasks_result.get("data") if tasks_result.get("success") else None
+    if not backend_rows:
+        return False
+
+    existing_details = st.session_state.get("task_details", {})
+    merged_details: dict[str, dict[str, Any]] = {}
+    for row in backend_rows:
+        task_id = row.get("task_id")
+        if not task_id:
+            continue
+        merged_details[task_id] = merge_backend_task_detail(existing_details.get(task_id), row)
+
+    if not merged_details:
+        return False
+
+    st.session_state.task_details = merged_details
+    st.session_state.tasks = sort_task_summaries(
+        [normalize_task_summary(detail) for detail in merged_details.values()]
+    )
+
+    if st.session_state.get("selected_task_id") not in st.session_state.task_details:
+        st.session_state.selected_task_id = st.session_state.tasks[0]["task_id"]
+    if (
+        st.session_state.get("current_task_id") is not None
+        and st.session_state.get("current_task_id") not in st.session_state.task_details
+    ):
+        st.session_state.current_task_id = st.session_state.tasks[0]["task_id"]
+
+    return True
+
+
+def maybe_sync_tasks_from_backend(force: bool = False, limit: int = 50) -> bool:
+    now_ts = time.time()
+    last_sync_ts = st.session_state.get("last_backend_sync_ts", 0.0)
+    if not force and (now_ts - last_sync_ts) < 3.0:
+        return False
+
+    synced = sync_tasks_from_backend(limit=limit)
+    if synced:
+        st.session_state.last_backend_sync_ts = now_ts
+    return synced
 
 
 def normalize_backend_result(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -731,10 +1021,7 @@ def sort_task_summaries(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def build_initial_session_data() -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    details = [normalize_task_detail(task) for task in load_mock_tasks()]
-    task_details = {detail["task_id"]: detail for detail in details}
-    tasks = sort_task_summaries([normalize_task_summary(detail) for detail in details])
-    return tasks, task_details
+    return [], {}
 
 
 def initialize_state() -> None:
@@ -758,14 +1045,49 @@ def initialize_state() -> None:
 
     st.session_state.tasks = sort_task_summaries(st.session_state.tasks)
     if "selected_task_id" not in st.session_state:
-        st.session_state.selected_task_id = st.session_state.tasks[0]["task_id"]
+        st.session_state.selected_task_id = st.session_state.tasks[0]["task_id"] if st.session_state.tasks else None
     if "created_task_id" not in st.session_state:
         st.session_state.created_task_id = None
+    if "upload_action_busy" not in st.session_state:
+        st.session_state.upload_action_busy = False
+    if "upload_action_name" not in st.session_state:
+        st.session_state.upload_action_name = None
+    if "upload_action_started_at" not in st.session_state:
+        st.session_state.upload_action_started_at = 0.0
+    if "last_backend_sync_ts" not in st.session_state:
+        st.session_state.last_backend_sync_ts = 0.0
     if "current_page" not in st.session_state:
         st.session_state.current_page = "总览工作台"
     if "pending_page" in st.session_state:
         st.session_state.current_page = st.session_state.pending_page
         del st.session_state.pending_page
+    if "standard_library_query" not in st.session_state:
+        st.session_state.standard_library_query = ""
+    if "standard_library_page" not in st.session_state:
+        st.session_state.standard_library_page = 1
+    if "standard_library_page_size" not in st.session_state:
+        st.session_state.standard_library_page_size = 20
+    if "standard_library_operator" not in st.session_state:
+        st.session_state.standard_library_operator = STANDARD_LIBRARY_OPERATOR
+    if "standard_library_query_input" not in st.session_state:
+        st.session_state.standard_library_query_input = st.session_state.standard_library_query
+    if "standard_library_editing_id" not in st.session_state:
+        st.session_state.standard_library_editing_id = None
+    if "standard_library_toast" not in st.session_state:
+        st.session_state.standard_library_toast = None
+    if "standard_library_pending_delete_id" not in st.session_state:
+        st.session_state.standard_library_pending_delete_id = None
+    if "pending_pdf_compare_notice" not in st.session_state:
+        st.session_state.pending_pdf_compare_notice = ""
+    if "last_synced_page" not in st.session_state:
+        st.session_state.last_synced_page = ""
+
+    # Failsafe: avoid getting stuck in busy mode after unexpected interruption.
+    if st.session_state.upload_action_busy and st.session_state.upload_action_started_at:
+        if time.time() - st.session_state.upload_action_started_at > 900:
+            st.session_state.upload_action_busy = False
+            st.session_state.upload_action_name = None
+            st.session_state.upload_action_started_at = 0.0
 
 
 def upsert_task_summary(summary: dict[str, Any]) -> None:
@@ -794,6 +1116,67 @@ def apply_page_style() -> None:
         }
         div[data-testid="stMetricValue"] { color: #0f172a; font-size: 1.62rem; }
         .section-note { color: #64748b; font-size: 0.92rem; margin-top: -0.3rem; }
+        .page-loading-mask {
+            align-items: center;
+            background: rgba(255, 255, 255, 0.7);
+            display: flex;
+            inset: 0;
+            justify-content: center;
+            position: fixed;
+            z-index: 9999;
+        }
+        .page-loading-card {
+            background: #ffffff;
+            border: 1px solid #dbe2ea;
+            border-radius: 10px;
+            box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
+            color: #0f172a;
+            font-size: 1.06rem;
+            font-weight: 600;
+            padding: 14px 22px;
+        }
+        .collapsible-section-title {
+            color: #0f172a;
+            font-size: 1.72rem;
+            font-weight: 700;
+            line-height: 1.2;
+            margin: 0.08rem 0 0.65rem 0;
+        }
+        .jump-anchor {
+            display: block;
+            height: 0;
+            margin: 0;
+            padding: 0;
+            visibility: hidden;
+        }
+        .jump-link-caption {
+            color: #6b7280;
+            font-size: 0.88rem;
+            margin: 0 0 0.35rem 0;
+        }
+        .jump-link-caption__anchor,
+        .jump-link-caption__disabled {
+            color: #6b7280;
+            text-decoration: none;
+        }
+        .jump-link-caption__anchor:hover {
+            color: #1d4ed8;
+            text-decoration: underline;
+        }
+        .jump-link-caption__disabled {
+            border-bottom: 1px dashed #cbd5e1;
+            cursor: default;
+        }
+        .jump-back-link {
+            color: #1d4ed8;
+            display: inline-block;
+            font-size: 0.92rem;
+            margin-bottom: 0.85rem;
+            text-decoration: none;
+        }
+        .jump-back-link:hover {
+            text-decoration: underline;
+        }
         .soft-panel {
             background: #ffffff;
             border: 1px solid #e6eaf0;
@@ -827,6 +1210,43 @@ def apply_page_style() -> None:
             border-color: #1e40af;
             color: #ffffff;
         }
+        [class*="st-key-collapse_toggle_"] button[kind="secondary"],
+        [class*="st-key-collapse_toggle_"] button[data-testid="stBaseButton-secondary"] {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            color: #334155;
+            line-height: 1;
+            min-height: 2.6rem;
+            padding: 0;
+            justify-content: flex-start;
+        }
+        [class*="st-key-collapse_toggle_"] button[kind="secondary"] p,
+        [class*="st-key-collapse_toggle_"] button[data-testid="stBaseButton-secondary"] p {
+            color: inherit;
+            font-size: 3.45rem;
+            line-height: 1;
+            margin: 0;
+        }
+        [class*="st-key-collapse_toggle_"] button[kind="secondary"]:hover,
+        [class*="st-key-collapse_toggle_"] button[data-testid="stBaseButton-secondary"]:hover,
+        [class*="st-key-collapse_toggle_"] button[kind="secondary"]:focus,
+        [class*="st-key-collapse_toggle_"] button[data-testid="stBaseButton-secondary"]:focus {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            color: #1d4ed8;
+        }
+        [class*="st-key-edit_standard_"] button,
+        [class*="st-key-delete_standard_"] button {
+            min-width: 68px;
+            padding-left: 10px;
+            padding-right: 10px;
+        }
+        [class*="st-key-edit_standard_"] button p,
+        [class*="st-key-delete_standard_"] button p {
+            white-space: nowrap;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -841,14 +1261,22 @@ def status_badge(status: str) -> str:
 def render_sidebar() -> str:
     st.sidebar.title("图纸识别系统")
     st.sidebar.caption("图纸识别 POC 原型")
-    page = st.sidebar.radio(
+    busy = st.session_state.get("upload_action_busy", False)
+
+    requested_page = st.sidebar.radio(
         "导航",
-        ["总览工作台", "新上传任务", "结果查看"],
+        ["总览工作台", "新上传任务", "结果查看", "标准信息库"],
         label_visibility="collapsed",
         key="current_page",
+        disabled=busy,
     )
+
+    if busy:
+        st.sidebar.info("当前操作执行中，导航暂不可点击，请等待完成。")
+
+    page = requested_page
+
     st.sidebar.divider()
-    st.sidebar.caption("演示环境")
     return page
 
 
@@ -858,8 +1286,6 @@ def summary_rows(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "任务编号": task["task_id"],
             "任务名称": task["task_name"],
             "PDF 数量": task["pdf_count"],
-            "已处理数量": task["processed_count"],
-            "待复核数量": task["review_count"],
             "状态": task["status"],
             "创建时间": task["created_at"],
             "操作提示": "进入结果查看页查看详情",
@@ -873,20 +1299,12 @@ def calculate_metrics(
     task_details: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     today = datetime.now().strftime("%Y-%m-%d")
-    standards = [
-        standard
-        for detail in task_details.values()
-        for standard in detail.get("standards", [])
-    ]
-    standard_passes = sum(1 for standard in standards if standard["status"] == "通过")
     return {
         "total_tasks": len(tasks),
         "today_pdfs": sum(task["pdf_count"] for task in tasks if task["created_at"].startswith(today)),
         "processing_tasks": sum(1 for task in tasks if task["status"] == "处理中"),
         "completed_tasks": sum(1 for task in tasks if task["status"] == "已完成"),
         "review_count": sum(task["review_count"] for task in tasks),
-        "failed_count": sum(failed_count(detail) for detail in task_details.values()),
-        "standard_pass_rate": standard_passes / len(standards) if standards else 0,
     }
 
 
@@ -894,6 +1312,27 @@ def render_overview(
     tasks: list[dict[str, Any]],
     task_details: dict[str, dict[str, Any]],
 ) -> None:
+    page_name = "总览工作台"
+    should_sync = st.session_state.get("last_synced_page") != page_name
+    if should_sync:
+        loading_placeholder = st.empty()
+        loading_placeholder.markdown(
+            """
+            <div class="page-loading-mask">
+                <div class="page-loading-card">加载数据中...</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # 仅在切入总览页时主动同步，避免页面内任意按钮都触发遮罩。
+        maybe_sync_tasks_from_backend(force=True, limit=100)
+        loading_placeholder.empty()
+    st.session_state.last_synced_page = page_name
+
+    tasks = st.session_state.tasks
+    task_details = st.session_state.task_details
+
     st.title("图纸识别系统 / 总览工作台")
     st.markdown('<p class="section-note">掌握识别任务整体进度与复核情况</p>', unsafe_allow_html=True)
     metrics = calculate_metrics(tasks, task_details)
@@ -902,9 +1341,6 @@ def render_overview(
         ("今日上传 PDF 数", metrics["today_pdfs"]),
         ("处理中任务数", metrics["processing_tasks"]),
         ("已完成任务数", metrics["completed_tasks"]),
-        ("待复核数量", metrics["review_count"]),
-        ("异常 / 失败数量", metrics["failed_count"]),
-        ("标准通过率", f"{metrics['standard_pass_rate']:.1%}"),
     ]
     metric_cols = st.columns(4)
     for index, (label, value) in enumerate(metric_items):
@@ -1092,6 +1528,7 @@ def ensure_upload_state() -> None:
         "standard_detection_results": None,
         "upload_action_busy": False,
         "upload_action_name": None,
+        "upload_action_started_at": 0.0,
         "upload_action_feedback": None,
     }
     for key, default in state_defaults.items():
@@ -1102,6 +1539,7 @@ def ensure_upload_state() -> None:
 def start_upload_action(action: str) -> None:
     st.session_state.upload_action_busy = True
     st.session_state.upload_action_name = action
+    st.session_state.upload_action_started_at = time.time()
     st.session_state.upload_action_feedback = None
 
 
@@ -1111,6 +1549,7 @@ def finish_upload_action(
 ) -> None:
     st.session_state.upload_action_busy = False
     st.session_state.upload_action_name = None
+    st.session_state.upload_action_started_at = 0.0
     st.session_state.upload_action_feedback = (
         {"type": feedback_type, "message": message}
         if feedback_type and message
@@ -1149,48 +1588,138 @@ def render_upload_feedback() -> None:
     st.session_state.upload_action_feedback = None
 
 
+def toggle_section_expanded(session_key: str) -> None:
+    st.session_state[session_key] = not st.session_state[session_key]
+
+
+def render_collapsible_section_header(title: str, state_key: str) -> bool:
+    session_key = f"section_expanded_{state_key}"
+    if session_key not in st.session_state:
+        st.session_state[session_key] = True
+
+    toggle_col, title_col = st.columns([0.032, 0.968])
+    with toggle_col:
+        with st.container(key=f"collapse_toggle_{state_key}"):
+            icon = "▾" if st.session_state[session_key] else "▸"
+            st.button(
+                icon,
+                key=f"{session_key}_toggle",
+                help="展开或收起此部分",
+                use_container_width=True,
+                on_click=toggle_section_expanded,
+                args=(session_key,),
+            )
+
+    with title_col:
+        st.markdown(
+            f"<div class='collapsible-section-title'>{title}</div>",
+            unsafe_allow_html=True,
+        )
+
+    return st.session_state[session_key]
+
+
+def resolve_table_index(item: dict[str, Any], fallback_index: int) -> int:
+    raw_index = item.get("table_index") or item.get("index") or fallback_index
+    try:
+        return int(raw_index)
+    except (TypeError, ValueError):
+        return fallback_index
+
+
+def preview_anchor_id(table_index: int) -> str:
+    return f"table-preview-{table_index}"
+
+
+def markdown_anchor_id(table_index: int) -> str:
+    return f"markdown-result-{table_index}"
+
+
+def render_preview_title_link(page: int, table_index: int, has_markdown: bool) -> None:
+    title_text = f"第{page}页 - 表格 {table_index}"
+    if has_markdown:
+        st.markdown(
+            (
+                f'<div class="jump-link-caption">'
+                f'<a class="jump-link-caption__anchor" href="#{markdown_anchor_id(table_index)}" '
+                f'title="点击跳转到对应Markdown">{title_text}</a>'
+                f"</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown(
+        (
+            f'<div class="jump-link-caption">'
+            f'<span class="jump-link-caption__disabled" title="请先点击转为Markdown">{title_text}</span>'
+            f"</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 def render_table_previews(tables: list[dict[str, Any]]) -> None:
     if not tables:
         return
 
-    st.markdown("### 📸 表格图片预览")
+    previews_expanded = render_collapsible_section_header("📸 表格图片预览", "table_previews")
+    markdown_results = st.session_state.get("markdown_results", [])
+    markdown_table_indexes = {
+        resolve_table_index(result, fallback_index)
+        for fallback_index, result in enumerate(markdown_results, start=1)
+        if result.get("success") and result.get("md_content")
+    }
 
-    cols_per_row = 2
-    for index in range(0, len(tables), cols_per_row):
-        cols = st.columns(cols_per_row)
-        for offset in range(cols_per_row):
-            table_index = index + offset
-            if table_index >= len(tables):
-                continue
+    for fallback_index, table in enumerate(tables, start=1):
+        table_index = resolve_table_index(table, fallback_index)
+        image_url = table.get("image_url", "")
+        page = table.get("page", 0)
 
-            table = tables[table_index]
-            image_url = table.get("image_url", "")
-            page = table.get("page", 0)
+        st.markdown(
+            f'<div id="{preview_anchor_id(table_index)}" class="jump-anchor"></div>',
+            unsafe_allow_html=True,
+        )
 
-            with cols[offset]:
-                st.caption(f"第{page}页 - 表格 {table_index + 1}")
-                if image_url:
-                    full_url = f"{BACKEND_BASE_URL}{image_url}"
-                    st.image(full_url, use_container_width=True)
-                    st.caption(f"URL: {full_url}")
-                else:
-                    st.warning("图片路径无效")
+        if not previews_expanded:
+            continue
+
+        render_preview_title_link(page, table_index, table_index in markdown_table_indexes)
+        if image_url:
+            full_url = f"{BACKEND_BASE_URL}{image_url}"
+            st.image(full_url, use_container_width=True)
+            st.caption(f"URL: {full_url}")
+        else:
+            st.warning("图片路径无效")
 
 
 def render_markdown_results(results: list[dict[str, Any]]) -> None:
     if not results:
         return
 
-    st.markdown("### 📄 Markdown 转换结果")
+    markdown_expanded = render_collapsible_section_header("📄 Markdown 转换结果", "markdown_results")
+
     current_task_id = st.session_state.current_task_id or "current"
 
-    for result in results:
+    for fallback_index, result in enumerate(results, start=1):
+        table_index = resolve_table_index(result, fallback_index)
         if result.get("success"):
-            table_index = result.get("table_index", 0)
             md_content = result.get("md_content", "")
             patched = result.get("patched", False)
 
+            st.markdown(
+                f'<div id="{markdown_anchor_id(table_index)}" class="jump-anchor"></div>',
+                unsafe_allow_html=True,
+            )
+
+            if not markdown_expanded:
+                continue
+
             with st.expander(f"表格 {table_index} {'(已优化)' if patched else ''}", expanded=False):
+                st.markdown(
+                    f'<a class="jump-back-link" href="#{preview_anchor_id(table_index)}" title="点击跳转到对应表格">查看对应表格</a>',
+                    unsafe_allow_html=True,
+                )
                 if md_content:
                     if "<table>" in md_content or "<tr>" in md_content:
                         st.markdown(md_content, unsafe_allow_html=True)
@@ -1207,7 +1736,8 @@ def render_markdown_results(results: list[dict[str, Any]]) -> None:
                 else:
                     st.info("Markdown 内容为空")
         else:
-            table_index = result.get("table_index", 0)
+            if not markdown_expanded:
+                continue
             error = result.get("error", "未知错误")
             st.error(f"❌ 表格 {table_index} 转换失败: {error}")
 
@@ -1222,21 +1752,26 @@ def render_standard_detection_results(detection_data: dict[str, Any]) -> None:
     similar = detection_data.get("similar_count", 0)
     not_found = detection_data.get("not_found_count", 0)
 
-    st.markdown("### 📊 标准检测统计")
+    stats_expanded = render_collapsible_section_header("📊 标准检测统计", "standard_stats")
 
-    stat_cols = st.columns(5)
-    stat_cols[0].metric("总计", total_standards)
-    stat_cols[1].metric("完全符合", exact_match)
-    stat_cols[2].metric("年份不一致", year_mismatch)
-    stat_cols[3].metric("较为相似", similar)
-    stat_cols[4].metric("不存在", not_found)
+    if stats_expanded:
+        stat_cols = st.columns(5)
+        stat_cols[0].metric("总计", total_standards)
+        stat_cols[1].metric("完全符合", exact_match)
+        stat_cols[2].metric("年份不一致", year_mismatch)
+        stat_cols[3].metric("较为相似", similar)
+        stat_cols[4].metric("不存在", not_found)
 
     results = detection_data.get("results", [])
+    details_expanded = render_collapsible_section_header("📋 详细检测结果", "standard_details")
+
     if not results:
-        st.info("ℹ️ 未在Markdown文件中检测到标准号。")
+        if details_expanded:
+            st.info("ℹ️ 未在Markdown文件中检测到标准号。")
         return
 
-    st.markdown("### 📋 详细检测结果")
+    if not details_expanded:
+        return
 
     table_groups: dict[int, list[dict[str, Any]]] = {}
     for result in results:
@@ -1253,7 +1788,6 @@ def render_standard_detection_results(detection_data: dict[str, Any]) -> None:
                 extracted = result.get("extracted", {})
                 matched = result.get("matched_library_entry")
                 status = result.get("status", "")
-                score = result.get("score", 0)
                 message = result.get("message", "")
 
                 status_color = {
@@ -1267,7 +1801,7 @@ def render_standard_detection_results(detection_data: dict[str, Any]) -> None:
                 st.markdown(f"""
                 <div style="background-color: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 4px solid {status_color};">
                     <strong>标准号 {index}:</strong> <code style="background-color: #e9ecef; padding: 2px 6px; border-radius: 3px;">{extracted.get('original', 'N/A')}</code><br>
-                    <strong>比对结果:</strong> <span style="color: {status_color}; font-weight: bold;">{status}</span> (分数: {score})<br>
+                    <strong>比对结果:</strong> <span style="color: {status_color}; font-weight: bold;">{status}</span><br>
                     <strong>标准库匹配:</strong> {matched.get('original', '无') if matched else '无'}<br>
                     <strong>说明:</strong> {message}
                 </div>
@@ -1370,6 +1904,20 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
 
             st.session_state.task_details[detail["task_id"]] = detail
             upsert_task_summary(normalize_task_summary(detail))
+
+            maybe_sync_tasks_from_backend(force=True)
+            task_status_result = get_task_status_from_backend(task_id)
+            if task_status_result["success"]:
+                detail = merge_backend_task_detail(detail, task_status_result["data"])
+            else:
+                detail = st.session_state.task_details.get(task_id, detail)
+
+            detail["task_name"] = normalized_task_name or detail.get("task_name") or uploaded_files[0].name
+            detail["description"] = description.strip()
+            detail["backend_file_path"] = backend_data.get("file_path", "")
+            st.session_state.task_details[task_id] = detail
+            upsert_task_summary(normalize_task_summary(detail))
+
             st.session_state.selected_task_id = detail["task_id"]
             st.session_state.current_task_id = task_id
             st.session_state.upload_completed = True
@@ -1396,6 +1944,7 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
         status_data = status_result["data"]
         status = status_data.get("status", 0)
         current_step = status_data.get("current_step", "")
+        table_count = status_data.get("table_count", 0)
 
         if status == 0 or current_step == "文件已上传,等待解析":
             with st.spinner("🔍 正在解析PDF并提取表格图片，这可能需要几分钟..."):
@@ -1421,6 +1970,7 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
                 st.session_state.current_tables = tables
                 st.session_state.tables_parsed = bool(tables)
                 reset_markdown_outputs()
+                maybe_sync_tasks_from_backend(force=True)
 
                 print(f"[前端调试] 已保存 {len(tables)} 个表格到 session_state")
 
@@ -1430,6 +1980,12 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
                 )
 
             finish_upload_action_and_rerun("error", f"❌ 解析失败: {process_result['message']}")
+
+        if table_count > 0:
+            finish_upload_action_and_rerun(
+                "info",
+                "✅ 表格已提取完成，请点击'转为Markdown'按钮。",
+            )
 
         if status == 2 or current_step == "解析完成":
             finish_upload_action_and_rerun("info", "✅ 表格已经解析完成，请点击'转为Markdown'按钮。")
@@ -1458,8 +2014,9 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
         status_data = status_result["data"]
         status = status_data.get("status", 0)
         current_step = status_data.get("current_step", "")
+        table_count = status_data.get("table_count", 0)
 
-        if status == 2 or current_step == "解析完成":
+        if table_count > 0:
             tables = st.session_state.current_tables
 
             print(f"[前端调试] Markdown按钮: status={status}, tables数量={len(tables) if tables else 0}")
@@ -1500,6 +2057,7 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
                 st.session_state.markdown_results = results
                 st.session_state.markdown_conversion_completed = True
                 st.session_state.standard_detection_results = None
+                maybe_sync_tasks_from_backend(force=True)
                 print(f"[前端调试] 已保存 {len(md_file_paths)} 个Markdown文件路径")
 
                 finish_upload_action_and_rerun(
@@ -1509,7 +2067,7 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
 
             finish_upload_action_and_rerun("error", f"❌ 转换失败: {markdown_result['message']}")
 
-        if status == 0 or status == 1:
+        if status == 0 and table_count == 0:
             finish_upload_action_and_rerun(
                 "warning",
                 f"️ 表格还未提取完成，请先点击'开始识别'并等待解析完成。\n\n当前状态: {current_step}",
@@ -1541,6 +2099,7 @@ def render_upload(tasks: list[dict[str, Any]]) -> None:
             detection_data = detection_result["data"]
             total_standards = detection_data.get("total_standards", 0)
             st.session_state.standard_detection_results = detection_data
+            maybe_sync_tasks_from_backend(force=True)
 
             finish_upload_action_and_rerun(
                 "success",
@@ -1576,15 +2135,489 @@ def render_task_header(detail: dict[str, Any]) -> None:
     st.subheader(f"{detail['task_id']}  {detail['task_name']}")
     st.markdown(status_badge(detail["status"]), unsafe_allow_html=True)
     st.caption(detail["description"] or "暂无任务说明")
-    cols = st.columns(6)
+    cols = st.columns(4)
     cols[0].metric("PDF 数量", len(detail["pdfs"]))
     cols[1].metric("当前状态", detail["status"])
     cols[2].metric("已识别表格数", len(detail["tables"]))
-    cols[3].metric("标准条数", len(detail["standards"]))
-    cols[4].metric("待复核数量", review_count(detail))
-    cols[5].metric("已处理数量", processed_count(detail))
-    progress = processed_count(detail) / len(detail["pdfs"]) if detail["pdfs"] else 0
+    standard_count = detail.get("standard_count")
+    cols[3].metric("标准条数", standard_count if standard_count is not None else len(detail["standards"]))
+    if detail.get("current_step") == "标准检测完成":
+        progress = 1.0
+    else:
+        progress = processed_count(detail) / len(detail["pdfs"]) if detail["pdfs"] else 0
     st.progress(progress, text=f"任务处理进度 {progress:.0%}")
+
+
+def get_query_param(name: str) -> str:
+    value = st.query_params.get(name)
+    if isinstance(value, list):
+        return str(value[0]) if value else ""
+    return str(value) if value is not None else ""
+
+
+def clear_resource_view_query() -> None:
+    params = dict(st.query_params)
+    for key in ("view", "task_id", "table_index", "standalone"):
+        params.pop(key, None)
+    st.query_params.clear()
+    for key, value in params.items():
+        st.query_params[key] = value
+
+
+def is_standalone_resource_view() -> bool:
+    return (
+        get_query_param("standalone") == "1"
+        and get_query_param("view") in {"table_image", "table_markdown", "table_result", "standard_compare", "overall_compare"}
+    )
+
+
+def build_resource_view_link(
+    view: str,
+    task_id: str,
+    table_index: int,
+    standalone: bool = True,
+    pdf_name: str = "",
+) -> str:
+    link = f"?view={view}&task_id={task_id}&table_index={table_index}"
+    if pdf_name:
+        link += f"&pdf_name={quote(str(pdf_name))}"
+    if standalone:
+        link += "&standalone=1"
+    return link
+
+
+def can_open_overall_compare_for_pdf(detail: dict[str, Any], pdf_name: str) -> bool:
+    if not str(pdf_name or "").strip():
+        return False
+    completed_at = str(detail.get("completed_at") or "").strip()
+    current_step = str(detail.get("current_step") or "").strip()
+    if not completed_at:
+        return False
+    if current_step != "标准检测完成":
+        return False
+    return True
+
+
+def render_pdf_compare_not_ready_dialog(pdf_name: str) -> None:
+    dialog_api = getattr(st, "dialog", None)
+    if callable(dialog_api):
+        @dialog_api("提示")
+        def _modal() -> None:
+            st.warning(f"请等待标准检测完成。\n\n当前文件: {pdf_name or '-'}")
+            if st.button("确定", key=f"confirm_pdf_notice_{pdf_name}"):
+                st.session_state.pending_pdf_compare_notice = ""
+                st.rerun()
+
+        _modal()
+        return
+
+    st.warning(f"请等待标准检测完成。当前文件: {pdf_name or '-'}")
+
+
+def apply_standalone_resource_style() -> None:
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] {
+            display: none;
+        }
+        [data-testid="collapsedControl"] {
+            display: none;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def resolve_table_image_url(table: dict[str, Any]) -> str:
+    image_url = table.get("image_url", "")
+    if image_url:
+        return f"{BACKEND_BASE_URL}{image_url}" if image_url.startswith("/") else image_url
+
+    image_path = table.get("image_path", "")
+    if not image_path:
+        return ""
+
+    try:
+        relative_path = Path(image_path).resolve().relative_to(BACKEND_TMP_DIR.resolve())
+        return f"{BACKEND_BASE_URL}/api/files/{relative_path.as_posix()}"
+    except Exception:
+        return ""
+
+
+def build_markdown_lookup(task_id: str) -> dict[int, dict[str, Any]]:
+    lookup: dict[int, dict[str, Any]] = {}
+    detail = st.session_state.get("task_details", {}).get(task_id, {})
+    for fallback_index, table in enumerate(detail.get("tables", []), start=1):
+        idx = resolve_table_index(table, fallback_index)
+        if idx <= 0:
+            continue
+        md_content = table.get("markdown_content") or ""
+        highlighted_md_content = table.get("highlighted_markdown_content") or ""
+        md_file = table.get("markdown_path") or ""
+        if md_content or highlighted_md_content or md_file:
+            lookup[idx] = {
+                "md_content": md_content,
+                "highlighted_md_content": highlighted_md_content,
+                "md_file": md_file,
+            }
+
+    markdown_dir = BACKEND_TMP_DIR / "markdown" / task_id
+    if markdown_dir.exists():
+        for md_file in sorted(markdown_dir.glob("*.md")):
+            match = re.search(r"_table_(\d+)", md_file.stem)
+            if not match:
+                continue
+            table_index = int(match.group(1))
+            if table_index in lookup and (
+                lookup[table_index].get("md_content")
+                or lookup[table_index].get("highlighted_md_content")
+            ):
+                continue
+            try:
+                md_content = md_file.read_text(encoding="utf-8")
+            except Exception:
+                md_content = ""
+            if table_index not in lookup:
+                lookup[table_index] = {
+                    "md_content": md_content,
+                    "highlighted_md_content": "",
+                    "md_file": str(md_file),
+                }
+
+    return lookup
+
+
+def parse_table_index_from_text(value: Any) -> int:
+    text = str(value or "")
+    match = re.search(r"(\d+)", text)
+    return int(match.group(1)) if match else 0
+
+
+def build_standard_compare_groups(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    task_id = detail.get("task_id", "")
+    tables = detail.get("tables", [])
+    table_lookup = {
+        resolve_table_index(table, idx): table
+        for idx, table in enumerate(tables, start=1)
+    }
+
+    groups: dict[int, dict[str, Any]] = {}
+
+    detection_data = st.session_state.get("standard_detection_results")
+    use_detection_data = bool(
+        detection_data
+        and st.session_state.get("current_task_id") == task_id
+        and detection_data.get("results")
+    )
+
+    if use_detection_data:
+        for result in detection_data.get("results", []):
+            table_index = parse_table_index_from_text(result.get("table_index"))
+            if table_index <= 0:
+                continue
+
+            group = groups.setdefault(
+                table_index,
+                {
+                    "table_index": table_index,
+                    "source_pdf": "-",
+                    "page": "-",
+                    "total": 0,
+                    "exact_match": 0,
+                    "year_mismatch": 0,
+                    "similar": 0,
+                    "not_found": 0,
+                    "results": [],
+                },
+            )
+
+            status = result.get("status", "")
+            group["total"] += 1
+            if status == "完全符合":
+                group["exact_match"] += 1
+            elif status == "年份不一致":
+                group["year_mismatch"] += 1
+            elif status == "较为相似":
+                group["similar"] += 1
+            elif status == "不存在":
+                group["not_found"] += 1
+
+            group["results"].append(result)
+    else:
+        for idx, item in enumerate(detail.get("standards", []), start=1):
+            table_index = parse_table_index_from_text(item.get("source_table")) or idx
+            group = groups.setdefault(
+                table_index,
+                {
+                    "table_index": table_index,
+                    "source_pdf": "-",
+                    "page": "-",
+                    "total": 0,
+                    "exact_match": 0,
+                    "year_mismatch": 0,
+                    "similar": 0,
+                    "not_found": 0,
+                    "results": [],
+                },
+            )
+
+            status = item.get("status", "")
+            group["total"] += 1
+            if status in {"通过", "完全符合"}:
+                group["exact_match"] += 1
+            elif status == "年份不一致":
+                group["year_mismatch"] += 1
+            elif status in {"待复核", "较为相似"}:
+                group["similar"] += 1
+            elif status in {"异常", "失败", "不存在"}:
+                group["not_found"] += 1
+
+            group["results"].append(
+                {
+                    "status": "完全符合" if status == "通过" else status,
+                    "message": item.get("suggestion", ""),
+                    "extracted": {"original": item.get("standard_no", "-")},
+                    "matched_library_entry": {"original": item.get("matched_standard", "-")},
+                }
+            )
+
+    for table_index, group in groups.items():
+        table = table_lookup.get(table_index)
+        if table:
+            group["source_pdf"] = table.get("pdf_name") or detail.get("original_filename") or "-"
+            group["page"] = table.get("page", "-")
+        else:
+            group["source_pdf"] = detail.get("original_filename") or "-"
+
+    return [groups[key] for key in sorted(groups.keys())]
+
+
+def render_table_resource_detail_view(task_details: dict[str, dict[str, Any]]) -> bool:
+    view = get_query_param("view")
+    if view not in {"table_image", "table_markdown", "table_result", "standard_compare", "overall_compare"}:
+        return False
+
+    task_id = get_query_param("task_id")
+    table_index_text = get_query_param("table_index")
+    try:
+        table_index = int(table_index_text)
+    except ValueError:
+        table_index = 0
+
+    detail = task_details.get(task_id)
+    if not detail:
+        st.error("未找到对应的表格资源。")
+        if st.button("返回结果列表", key="back_result_list_invalid"):
+            clear_resource_view_query()
+            st.rerun()
+        return True
+
+    if view == "overall_compare":
+        if st.button("返回结果列表", key=f"back_result_list_{view}_{task_id}"):
+            clear_resource_view_query()
+            st.rerun()
+
+        pdf_name = get_query_param("pdf_name")
+        title_pdf = pdf_name or detail.get("original_filename") or "-"
+        st.subheader(f"任务 {task_id} / PDF {title_pdf} / 总标准结果对比")
+
+        # 强校验: 必须任务已完成标准检测，且链接包含有效pdf_name。
+        if not can_open_overall_compare_for_pdf(detail, title_pdf):
+            st.warning("请等待标准检测完成")
+            return True
+
+        valid_pdf_names = {
+            str((pdf or {}).get("pdf_name") or "").strip()
+            for pdf in (detail.get("pdfs") or [])
+            if str((pdf or {}).get("pdf_name") or "").strip()
+        }
+        if valid_pdf_names and title_pdf not in valid_pdf_names:
+            st.error("当前PDF不属于该任务，无法查看总标准结果对比。")
+            return True
+
+        overall = detail.get("overall_standard_compare") or {}
+        rows = overall.get("results") or []
+
+        if rows:
+            table_rows = []
+            for item in rows:
+                extracted = item.get("extracted") or {}
+                matched = item.get("matched_library_entry") or {}
+                table_rows.append(
+                    {
+                        "提取标准信息": extracted.get("original") or "-",
+                        "标准库信息": matched.get("original") or "-",
+                        "比对结果": item.get("status") or "-",
+                    }
+                )
+            st.dataframe(table_rows, width="stretch", hide_index=True)
+        else:
+            st.info("当前任务暂无总标准对比结果。")
+
+        return True
+
+    if table_index <= 0:
+        st.error("未找到对应的表格资源。")
+        if st.button("返回结果列表", key="back_result_list_invalid_table"):
+            clear_resource_view_query()
+            st.rerun()
+        return True
+
+    tables = detail.get("tables", [])
+    table = next(
+        (item for idx, item in enumerate(tables, start=1) if resolve_table_index(item, idx) == table_index),
+        None,
+    )
+    if not table:
+        st.error("未找到对应的表格记录。")
+        if st.button("返回结果列表", key="back_result_list_missing"):
+            clear_resource_view_query()
+            st.rerun()
+        return True
+
+    if st.button("返回结果列表", key=f"back_result_list_{view}_{task_id}_{table_index}"):
+        clear_resource_view_query()
+        st.rerun()
+
+    st.subheader(f"任务 {task_id} / 表格 {table_index}")
+    source_pdf = table.get("pdf_name") or detail.get("original_filename") or "-"
+    st.caption(f"来源PDF: {source_pdf} | 页码: {table.get('page', '-')}")
+
+    if view == "table_image":
+        image_url = resolve_table_image_url(table)
+        if image_url:
+            st.image(image_url, use_container_width=True)
+            st.caption(f"图片链接: {image_url}")
+            try:
+                image_resp = requests.get(image_url, timeout=15)
+                if image_resp.ok:
+                    st.download_button(
+                        label="下载裁剪表格图片",
+                        data=image_resp.content,
+                        file_name=f"{task_id}_table_{table_index}.png",
+                        mime="image/png",
+                        key=f"download_image_{task_id}_{table_index}",
+                    )
+            except Exception:
+                pass
+        else:
+            st.warning("未找到可访问的裁剪表格图片链接。")
+        return True
+
+    if view == "table_result":
+        image_col, md_col = st.columns(2)
+
+        with image_col:
+            st.markdown("#### 裁剪表格图片")
+            image_url = resolve_table_image_url(table)
+            if image_url:
+                st.image(image_url, use_container_width=True)
+                try:
+                    image_resp = requests.get(image_url, timeout=15)
+                    if image_resp.ok:
+                        st.download_button(
+                            label="下载裁剪表格图片",
+                            data=image_resp.content,
+                            file_name=f"{task_id}_table_{table_index}.png",
+                            mime="image/png",
+                            key=f"download_image_combined_{task_id}_{table_index}",
+                        )
+                except Exception:
+                    pass
+            else:
+                st.warning("未找到可访问的裁剪表格图片链接。")
+
+        with md_col:
+            st.markdown("#### 表格识别Markdown")
+            markdown_lookup = build_markdown_lookup(task_id)
+            markdown_item = markdown_lookup.get(table_index)
+            md_content = (markdown_item or {}).get("md_content", "")
+            if md_content:
+                if "<table>" in md_content or "<tr>" in md_content:
+                    st.markdown(md_content, unsafe_allow_html=True)
+                else:
+                    st.markdown(md_content)
+                st.download_button(
+                    label="下载Markdown",
+                    data=md_content,
+                    file_name=f"{task_id}_table_{table_index}.md",
+                    mime="text/markdown",
+                    key=f"download_markdown_combined_{task_id}_{table_index}",
+                )
+            else:
+                st.info("等待markdown生成")
+
+        return True
+
+    if view == "standard_compare":
+        compare_groups = build_standard_compare_groups(detail)
+        group = next((item for item in compare_groups if item.get("table_index") == table_index), None)
+        if not group:
+            st.warning("未找到该表格的标准对比结果。")
+            return True
+
+        st.markdown("### 标准对比结果预览")
+        stat_cols = st.columns(5)
+        stat_cols[0].metric("总计标准号", group["total"])
+        stat_cols[1].metric("完全符合", group["exact_match"])
+        stat_cols[2].metric("年份不一致", group["year_mismatch"])
+        stat_cols[3].metric("较为相似", group["similar"])
+        stat_cols[4].metric("不存在", group["not_found"])
+
+        st.markdown("#### 对应Markdown（命中标准号已高亮）")
+        markdown_lookup = build_markdown_lookup(task_id)
+        markdown_item = markdown_lookup.get(table_index)
+        md_content = (markdown_item or {}).get("md_content", "")
+        highlighted_md_content = (markdown_item or {}).get("highlighted_md_content", "")
+        if highlighted_md_content:
+            st.markdown(highlighted_md_content, unsafe_allow_html=True)
+        elif md_content:
+            st.markdown(md_content, unsafe_allow_html=True)
+        else:
+            st.info("等待markdown生成")
+
+        st.markdown("#### 比对明细")
+        detail_rows = []
+        for result in group.get("results", []):
+            extracted = result.get("extracted", {})
+            matched = result.get("matched_library_entry") or {}
+            detail_rows.append(
+                {
+                    "提取标准信息": extracted.get("original", "-"),
+                    "标准库信息": matched.get("original", "-"),
+                    "比对结果": result.get("status", ""),
+                    "说明": result.get("message", "") or "-",
+                }
+            )
+
+        if detail_rows:
+            st.dataframe(detail_rows, width="stretch", hide_index=True)
+        else:
+            st.info("当前表格暂无比对明细。")
+
+        return True
+
+    markdown_lookup = build_markdown_lookup(task_id)
+    markdown_item = markdown_lookup.get(table_index)
+    md_content = (markdown_item or {}).get("md_content", "")
+    if md_content:
+        if "<table>" in md_content or "<tr>" in md_content:
+            st.markdown(md_content, unsafe_allow_html=True)
+        else:
+            st.markdown(md_content)
+        st.download_button(
+            label="下载Markdown",
+            data=md_content,
+            file_name=f"{task_id}_table_{table_index}.md",
+            mime="text/markdown",
+            key=f"download_markdown_{task_id}_{table_index}",
+        )
+    else:
+        st.warning("该表格尚未生成Markdown内容，请先执行转为Markdown。")
+
+    return True
 
 
 def render_result_tabs(detail: dict[str, Any]) -> None:
@@ -1592,55 +2625,115 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
         ["图纸识别结果", "表格解析结果", "标准提取比对结果", "技术调试信息"]
     )
     with drawing_tab:
-        st.dataframe(
-            [
-                {
-                    "PDF 文件": pdf["pdf_name"],
-                    "图号": pdf["drawing_no"] or "-",
-                    "项目名称": pdf["project_name"] or "-",
-                    "装置 / 设备": pdf["equipment_name"] or pdf["unit_name"] or "-",
-                    "专业": pdf["discipline"] or "-",
-                    "阶段": pdf["design_stage"] or "-",
-                    "状态": pdf["status"],
-                }
-                for pdf in detail["pdfs"]
-            ],
-            width="stretch",
-            hide_index=True,
+        pdf_file = detail.get("original_filename") or "，".join(
+            [file_name for file_name in detail.get("file_names", []) if file_name]
         )
+        pdf_rows = detail.get("pdfs") or []
+        if not pdf_rows:
+            pdf_rows = [{"pdf_name": pdf_file or "-", "status": detail.get("current_step") or "-"}]
+
+        pending_notice_pdf = st.session_state.get("pending_pdf_compare_notice") or ""
+        if pending_notice_pdf:
+            render_pdf_compare_not_ready_dialog(pending_notice_pdf)
+
+        header_style = "font-size:0.96rem;font-weight:700;line-height:1.25;margin-bottom:0.1rem;"
+        value_style = "font-size:0.92rem;line-height:1.35;"
+        col_spec = [0.25, 0.16, 0.18, 0.16, 0.13, 0.12]
+        header_cols = st.columns(col_spec, gap="small")
+        header_cols[0].markdown(f'<div style="{header_style}">任务号</div>', unsafe_allow_html=True)
+        header_cols[1].markdown(f'<div style="{header_style}">PDF 文件</div>', unsafe_allow_html=True)
+        header_cols[2].markdown(f'<div style="{header_style}">任务开始时间</div>', unsafe_allow_html=True)
+        header_cols[3].markdown(f'<div style="{header_style}">任务结束时间</div>', unsafe_allow_html=True)
+        header_cols[4].markdown(f'<div style="{header_style}">状态</div>', unsafe_allow_html=True)
+        header_cols[5].markdown(f'<div style="{header_style}">总标准结果对比</div>', unsafe_allow_html=True)
+
+        for idx, pdf in enumerate(pdf_rows, start=1):
+            current_pdf_name = pdf.get("pdf_name") or pdf_file or "-"
+            status_text = detail.get("current_step") or "-"
+            can_open = can_open_overall_compare_for_pdf(detail, current_pdf_name)
+            overall_compare_link = build_resource_view_link(
+                "overall_compare",
+                detail["task_id"],
+                0,
+                pdf_name=current_pdf_name,
+            )
+
+            row_cols = st.columns(col_spec, gap="small")
+            row_cols[0].markdown(f'<div style="{value_style}">{detail["task_id"]}</div>', unsafe_allow_html=True)
+            row_cols[1].markdown(f'<div style="{value_style}">{current_pdf_name}</div>', unsafe_allow_html=True)
+            row_cols[2].markdown(f'<div style="{value_style}">{detail.get("started_at") or "-"}</div>', unsafe_allow_html=True)
+            row_cols[3].markdown(f'<div style="{value_style}">{detail.get("completed_at") or "-"}</div>', unsafe_allow_html=True)
+            row_cols[4].markdown(f'<div style="{value_style}">{status_text}</div>', unsafe_allow_html=True)
+            if can_open:
+                row_cols[5].markdown(
+                    f'<a href="{overall_compare_link}" target="_blank">查看结果</a>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                if row_cols[5].button("查看结果", key=f"overall_pdf_guard_{detail['task_id']}_{idx}"):
+                    st.session_state.pending_pdf_compare_notice = str(current_pdf_name)
+                    st.rerun()
     with table_tab:
         tables = detail.get("tables", [])
         if tables:
-            rows = [
-                {
-                    "序号": table.get("table_index", "-"),
-                    "来源 PDF": table.get("pdf_name", "-"),
-                    "页码": table.get("page", "-"),
-                    "表格类型": table.get("label", "-"),
-                    "置信度": f"{table.get('score', 0):.0%}",
-                    "bbox": table.get("bbox", []),
-                    "裁剪文件路径": table.get("image_path", "-"),
-                }
-                for table in tables
-            ]
-            st.dataframe(rows, width="stretch", hide_index=True)
+            header_cols = st.columns([0.28, 0.22, 0.1, 0.4])
+            header_cols[0].markdown("**任务号**")
+            header_cols[1].markdown("**来源 PDF**")
+            header_cols[2].markdown("**页码**")
+            header_cols[3].markdown("**表格识别结果**")
+
+            for idx, table in enumerate(tables, start=1):
+                table_index = resolve_table_index(table, idx)
+                source_pdf = table.get("pdf_name") or detail.get("original_filename") or "-"
+                result_link = build_resource_view_link("table_result", detail["task_id"], table_index)
+
+                row_cols = st.columns([0.28, 0.22, 0.1, 0.4])
+                row_cols[0].write(detail["task_id"])
+                row_cols[1].write(source_pdf)
+                row_cols[2].write(table.get("page", "-"))
+                row_cols[3].markdown(
+                    f'<a href="{result_link}" target="_blank">表格{table_index}</a>',
+                    unsafe_allow_html=True,
+                )
+
+                st.divider()
         else:
             st.info("当前任务尚未生成表格解析结果。")
     with standard_tab:
-        rows = [
-            {
-                "PDF 文件": standard["pdf_name"],
-                "识别标准号": standard["standard_no"] or "-",
-                "标准库匹配": standard["matched_standard"],
-                "结论": standard["status"],
-                "来源表格": standard["source_table"],
-                "置信度": f"{standard['confidence']:.0%}",
-                "建议": standard["suggestion"],
-            }
-            for standard in detail["standards"]
-        ]
-        if rows:
-            st.dataframe(rows, width="stretch", hide_index=True)
+        groups = build_standard_compare_groups(detail)
+        if groups:
+            header_cols = st.columns([0.2, 0.13, 0.1, 0.1, 0.09, 0.09, 0.09, 0.08, 0.12])
+            header_cols[0].markdown("**任务id**")
+            header_cols[1].markdown("**来源pdf**")
+            header_cols[2].markdown("**来源表格**")
+            header_cols[3].markdown("**总计标准号**")
+            header_cols[4].markdown("**完全符合**")
+            header_cols[5].markdown("**年份不一致**")
+            header_cols[6].markdown("**较为相似**")
+            header_cols[7].markdown("**不存在**")
+            header_cols[8].markdown("**标准对比详情**")
+
+            for group in groups:
+                table_index = group["table_index"]
+                table_image_link = build_resource_view_link("table_image", detail["task_id"], table_index)
+                standard_compare_link = build_resource_view_link("standard_compare", detail["task_id"], table_index)
+                row_cols = st.columns([0.2, 0.13, 0.1, 0.1, 0.09, 0.09, 0.09, 0.08, 0.12])
+                row_cols[0].write(detail["task_id"])
+                row_cols[1].write(group.get("source_pdf", "-"))
+                row_cols[2].markdown(
+                    f'<a href="{table_image_link}" target="_blank">表格{table_index}</a>',
+                    unsafe_allow_html=True,
+                )
+                row_cols[3].write(group.get("total", 0))
+                row_cols[4].write(group.get("exact_match", 0))
+                row_cols[5].write(group.get("year_mismatch", 0))
+                row_cols[6].write(group.get("similar", 0))
+                row_cols[7].write(group.get("not_found", 0))
+                row_cols[8].markdown(
+                    f'<a href="{standard_compare_link}" target="_blank">查看详情</a>',
+                    unsafe_allow_html=True,
+                )
+                st.divider()
         else:
             st.info("当前任务尚未生成标准提取比对结果。")
     with debug_tab:
@@ -1653,41 +2746,340 @@ def render_results(
 ) -> None:
     st.title("图纸识别系统 / 结果查看")
     st.markdown('<p class="section-note">查看历史任务与单个任务的识别详情</p>', unsafe_allow_html=True)
+
+    page_name = "结果查看"
+    should_sync = st.session_state.get("last_synced_page") != page_name
+    if should_sync:
+        loading_placeholder = st.empty()
+        loading_placeholder.markdown(
+            """
+            <div class="page-loading-mask">
+                <div class="page-loading-card">加载数据中...</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        # 仅在切入结果页时主动同步，避免页面内按钮触发整页加载感。
+        maybe_sync_tasks_from_backend(force=True, limit=100)
+        loading_placeholder.empty()
+    st.session_state.last_synced_page = page_name
+
+    tasks = st.session_state.tasks
+    task_details = st.session_state.task_details
+
+    if not tasks:
+        st.info("暂无任务数据，请先在“新上传任务”页面创建任务。")
+        return
+
+    deep_link_task_id = get_query_param("task_id")
+    if deep_link_task_id:
+        refresh_single_task_detail_from_backend(deep_link_task_id)
+        task_details = st.session_state.task_details
+
+    if render_table_resource_detail_view(task_details):
+        return
+
     with st.expander("历史任务列表", expanded=False):
         st.dataframe(summary_rows(tasks), width="stretch", hide_index=True)
 
     labels = {f"{task['task_id']}｜{task['task_name']}": task["task_id"] for task in tasks}
     task_ids = list(labels.values())
+    previous_selected_task_id = st.session_state.selected_task_id
     selected_index = task_ids.index(st.session_state.selected_task_id) if st.session_state.selected_task_id in task_ids else 0
     selected_label = st.selectbox("选择任务", options=list(labels.keys()), index=selected_index)
     task_id = labels[selected_label]
     st.session_state.selected_task_id = task_id
+    cached_detail = st.session_state.task_details.get(task_id, {})
+    need_backend_highlight = (
+        str(cached_detail.get("current_step") or "") == "标准检测完成"
+        and bool(cached_detail.get("tables"))
+        and not any(
+            str((table or {}).get("highlighted_markdown_content") or "").strip()
+            for table in (cached_detail.get("tables") or [])
+        )
+    )
+    detail_incomplete = (
+        not cached_detail
+        or (
+            not cached_detail.get("tables")
+            and (
+                int(cached_detail.get("table_count") or 0) > 0
+                or str(cached_detail.get("current_step") or "") == "标准检测完成"
+            )
+        )
+        or (
+            not cached_detail.get("standards")
+            and int(cached_detail.get("standard_count") or 0) > 0
+        )
+        or need_backend_highlight
+    )
+
+    # 在进入结果页、切换任务、或缓存明细不完整时，主动拉取任务完整详情。
+    if should_sync or task_id != previous_selected_task_id or detail_incomplete:
+        refresh_single_task_detail_from_backend(task_id)
+    task_details = st.session_state.task_details
     detail = task_details[task_id]
 
     message = st.session_state.pop("demo_completion_message", None)
     if message:
         st.success(message)
-    if detail["status"] == "处理中":
-        if st.button("模拟完成识别", type="primary", key=f"complete_result_{task_id}"):
-            complete_task_for_demo(task_id)
-            st.session_state.demo_completion_message = "演示识别已完成，可查看识别结果。"
-            st.rerun()
 
     render_task_header(detail)
     st.divider()
     render_result_tabs(detail)
 
 
+def _run_delete_standard(standard_id: int) -> None:
+    delete_result = delete_standard_data_from_backend(int(standard_id))
+    if delete_result.get("success"):
+        st.session_state.standard_library_toast = {
+            "level": "success",
+            "message": "删除成功",
+        }
+        st.session_state.standard_library_pending_delete_id = None
+        if st.session_state.standard_library_editing_id == int(standard_id):
+            st.session_state.standard_library_editing_id = None
+        st.rerun()
+    else:
+        st.error(delete_result.get("message", "删除失败"))
+
+
+def render_standard_delete_confirm_dialog(standard_id: int, standard_no: str) -> None:
+    dialog_api = getattr(st, "dialog", None)
+    if callable(dialog_api):
+        @dialog_api("删除确认")
+        def _modal() -> None:
+            st.write(f"是否确认删除标准：{standard_no or '-'}")
+            confirm_cols = st.columns([0.3, 0.3, 0.4])
+            if confirm_cols[0].button("是", key=f"confirm_delete_standard_{standard_id}", type="primary"):
+                _run_delete_standard(standard_id)
+            if confirm_cols[1].button("否", key=f"cancel_delete_standard_{standard_id}"):
+                st.session_state.standard_library_pending_delete_id = None
+                st.rerun()
+
+        _modal()
+        return
+
+    # Fallback for older Streamlit versions without st.dialog.
+    st.warning(f"是否确认删除标准：{standard_no or '-'}")
+    confirm_cols = st.columns([0.12, 0.12, 0.76])
+    if confirm_cols[0].button("是", key=f"confirm_delete_standard_{standard_id}", type="primary"):
+        _run_delete_standard(standard_id)
+    if confirm_cols[1].button("否", key=f"cancel_delete_standard_{standard_id}"):
+        st.session_state.standard_library_pending_delete_id = None
+        st.rerun()
+
+
+def render_standard_library() -> None:
+    st.title("图纸识别系统 / 标准信息库")
+    st.markdown('<p class="section-note">标准库数据独立管理（增删改查与模糊查询）</p>', unsafe_allow_html=True)
+    st.session_state.last_synced_page = "标准信息库"
+
+    pending_toast = st.session_state.pop("standard_library_toast", None)
+    if isinstance(pending_toast, dict) and pending_toast.get("message"):
+        level = pending_toast.get("level", "success")
+        icon = "✅" if level == "success" else "⚠️"
+        st.toast(pending_toast.get("message"), icon=icon)
+
+    with st.form("standard_library_search_form", clear_on_submit=False):
+        query_col, size_col, user_col, action_col = st.columns([0.42, 0.16, 0.2, 0.22])
+        query_col.text_input(
+            "模糊查询",
+            key="standard_library_query_input",
+            placeholder="按标准号/标准类型/标准前缀查询",
+        )
+        page_size = size_col.selectbox(
+            "每页条数",
+            options=[10, 20, 50, 100],
+            index=[10, 20, 50, 100].index(st.session_state.standard_library_page_size),
+            key="standard_library_page_size_input",
+        )
+        user_col.text_input(
+            "操作人",
+            value=STANDARD_LIBRARY_OPERATOR,
+            disabled=True,
+        )
+        search_submitted = action_col.form_submit_button("查询", type="primary")
+
+    if search_submitted:
+        st.session_state.standard_library_query = (
+            st.session_state.get("standard_library_query_input", "") or ""
+        ).strip()
+        st.session_state.standard_library_page_size = int(page_size)
+        st.session_state.standard_library_page = 1
+        st.session_state.standard_library_editing_id = None
+        st.rerun()
+
+    st.divider()
+
+    with st.expander("新增标准信息", expanded=False):
+        with st.form("standard_library_create_form", clear_on_submit=True):
+            new_no = st.text_input("标准号")
+            new_type = st.text_input("标准类型")
+            new_prefix = st.text_input("标准前缀")
+            submitted = st.form_submit_button("新增", type="primary")
+
+        if submitted:
+            create_result = create_standard_data_from_backend(
+                standard_no=new_no,
+                standard_type=new_type,
+                standard_prefix=new_prefix,
+                operator=STANDARD_LIBRARY_OPERATOR,
+            )
+            if create_result.get("success"):
+                st.session_state.standard_library_toast = {
+                    "level": "success",
+                    "message": "新增成功",
+                }
+                st.rerun()
+            else:
+                st.error(create_result.get("message", "新增失败"))
+
+    list_result = list_standard_data_from_backend(
+        keyword=st.session_state.standard_library_query,
+        page=st.session_state.standard_library_page,
+        page_size=st.session_state.standard_library_page_size,
+    )
+
+    if not list_result.get("success"):
+        st.error(list_result.get("message", "查询失败"))
+        return
+
+    payload = list_result.get("data") or {}
+    items = payload.get("items") or []
+    total = int(payload.get("total") or 0)
+    page = int(payload.get("page") or 1)
+    page_size = int(payload.get("page_size") or st.session_state.standard_library_page_size)
+
+    st.caption(f"共 {total} 条，当前第 {page} 页")
+
+    if not items:
+        st.info("暂无标准信息数据")
+        return
+
+    pending_delete_id = st.session_state.get("standard_library_pending_delete_id")
+    if pending_delete_id is not None:
+        pending_row = next(
+            (row for row in items if int(row.get("id") or 0) == int(pending_delete_id)),
+            None,
+        )
+        if pending_row:
+            render_standard_delete_confirm_dialog(
+                int(pending_delete_id),
+                str(pending_row.get("standard_no") or ""),
+            )
+        else:
+            st.session_state.standard_library_pending_delete_id = None
+
+    # 在“标准类型”和“标准前缀”之间增加留白，避免两列过于拥挤。
+    column_spec = [0.17, 0.085, 0.03, 0.11, 0.13, 0.13, 0.09, 0.09, 0.145]
+    header_cols = st.columns(column_spec, gap="small")
+    header_cols[0].markdown("**标准号**")
+    header_cols[1].markdown("**标准类型**")
+    header_cols[2].markdown("")
+    header_cols[3].markdown("**标准前缀**")
+    header_cols[4].markdown("**创建时间**")
+    header_cols[5].markdown("**更新时间**")
+    header_cols[6].markdown("**创建人**")
+    header_cols[7].markdown("**更新人**")
+    header_cols[8].markdown("**操作**")
+
+    for row in items:
+        standard_id = row.get("id")
+        if not standard_id:
+            continue
+
+        with st.container(border=True):
+            row_cols = st.columns(column_spec, gap="small")
+            row_cols[0].write(row.get("standard_no") or "无")
+            row_cols[1].write(row.get("standard_type") or "无")
+            row_cols[2].write("")
+            row_cols[3].write(row.get("standard_prefix") or "无")
+            row_cols[4].write(format_date_only_text(row.get("create_time")))
+            row_cols[5].write(format_date_only_text(row.get("update_time")))
+            row_cols[6].write(row.get("create_user") or "无")
+            row_cols[7].write(row.get("update_user") or "无")
+
+            action_cols = row_cols[8].columns(2)
+            if action_cols[0].button("编辑", key=f"edit_standard_{standard_id}"):
+                st.session_state.standard_library_editing_id = int(standard_id)
+            if action_cols[1].button("删除", key=f"delete_standard_{standard_id}"):
+                st.session_state.standard_library_pending_delete_id = int(standard_id)
+                st.rerun()
+
+            if st.session_state.standard_library_editing_id == int(standard_id):
+                st.markdown(f"编辑记录（ID: {standard_id}）")
+                edit_no = st.text_input(
+                    "标准号",
+                    value=row.get("standard_no") or "",
+                    key=f"edit_standard_no_{standard_id}",
+                )
+                edit_type = st.text_input(
+                    "标准类型",
+                    value=row.get("standard_type") or "",
+                    key=f"edit_standard_type_{standard_id}",
+                )
+                edit_prefix = st.text_input(
+                    "标准前缀",
+                    value=row.get("standard_prefix") or "",
+                    key=f"edit_standard_prefix_{standard_id}",
+                )
+
+                op_cols = st.columns([0.2, 0.2, 0.6])
+                if op_cols[0].button("保存", key=f"save_standard_{standard_id}", type="primary"):
+                    update_result = update_standard_data_from_backend(
+                        standard_id=int(standard_id),
+                        standard_no=edit_no,
+                        standard_type=edit_type,
+                        standard_prefix=edit_prefix,
+                        operator=STANDARD_LIBRARY_OPERATOR,
+                    )
+                    if update_result.get("success"):
+                        st.session_state.standard_library_toast = {
+                            "level": "success",
+                            "message": "编辑成功",
+                        }
+                        st.session_state.standard_library_editing_id = None
+                        st.rerun()
+                    else:
+                        st.error(update_result.get("message", "更新失败"))
+
+                if op_cols[1].button("取消", key=f"cancel_edit_standard_{standard_id}"):
+                    st.session_state.standard_library_editing_id = None
+                    st.rerun()
+
+    page_count = max(1, (total + page_size - 1) // page_size)
+    pager_cols = st.columns([0.2, 0.2, 0.6])
+    if pager_cols[0].button("上一页", disabled=page <= 1, key="standard_library_prev"):
+        st.session_state.standard_library_page = max(1, page - 1)
+        st.rerun()
+    if pager_cols[1].button("下一页", disabled=page >= page_count, key="standard_library_next"):
+        st.session_state.standard_library_page = min(page_count, page + 1)
+        st.rerun()
+
+
 def main() -> None:
     apply_page_style()
     initialize_state()
+
+    if is_standalone_resource_view():
+        apply_standalone_resource_style()
+        render_results(st.session_state.tasks, st.session_state.task_details)
+        return
+
+    # Ensure deep-links from table result rows always render in the results page.
+    if get_query_param("view") in {"table_image", "table_markdown", "table_result", "standard_compare", "overall_compare"}:
+        st.session_state.current_page = "结果查看"
+
     page = render_sidebar()
     if page == "总览工作台":
         render_overview(st.session_state.tasks, st.session_state.task_details)
     elif page == "新上传任务":
         render_upload(st.session_state.tasks)
-    else:
+    elif page == "结果查看":
         render_results(st.session_state.tasks, st.session_state.task_details)
+    else:
+        render_standard_library()
 
 
 if __name__ == "__main__":

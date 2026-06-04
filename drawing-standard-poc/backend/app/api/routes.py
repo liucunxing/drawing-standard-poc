@@ -3,9 +3,10 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 from typing import List, Optional
 from backend.app.core.response import Result
-from backend.app.models.schemas import UserCreate
+from backend.app.models.schemas import UserCreate, StandardDataCreate, StandardDataUpdate
 from backend.app.services.user_service import user_service
 from backend.app.services.poc_service import poc_service
+from backend.app.services.standard_data_service import standard_data_service
 
 router = APIRouter()
 
@@ -55,9 +56,9 @@ async def upload_pdf(file: UploadFile = File(...), task_name: str = None):
 
 @router.get("/drawing/task/{task_id}", response_model=Result)
 async def get_task_status(task_id: str):
-    """查询任务状态和进度"""
+    """查询任务完整详情(含表格/标准比对结果)"""
     try:
-        data = poc_service.get_task_status(task_id=task_id)
+        data = poc_service.get_task_detail(task_id=task_id)
         if data:
             return Result.ok(data=data, msg="查询成功")
         else:
@@ -83,7 +84,7 @@ async def get_parse_status(task_id: str):
         }
     """
     try:
-        task_info = poc_service.get_task_status(task_id=task_id)
+        task_info = poc_service.get_task_status(task_id=task_id, include_details=False)
         if not task_info:
             return Result.fail(msg=f"任务不存在: {task_id}", code=404)
         
@@ -106,6 +107,67 @@ async def list_tasks(limit: int = 20):
     try:
         data = poc_service.list_tasks(limit=limit)
         return Result.ok(data=data, msg="查询成功")
+    except Exception as exc:
+        return Result.fail(msg=str(exc), code=500)
+
+
+@router.get("/standard-data", response_model=Result)
+async def list_standard_data(keyword: str = "", page: int = 1, page_size: int = 20):
+    """标准信息库列表（支持模糊查询）"""
+    try:
+        data = standard_data_service.list_standards(
+            keyword=keyword,
+            page=page,
+            page_size=page_size,
+        )
+        return Result.ok(data=data, msg="查询成功")
+    except Exception as exc:
+        return Result.fail(msg=str(exc), code=500)
+
+
+@router.post("/standard-data", response_model=Result)
+async def create_standard_data(payload: StandardDataCreate):
+    """新增标准信息（若标准号重复则失败）"""
+    try:
+        data = standard_data_service.create_standard(
+            standard_no=payload.standard_no,
+            standard_type=payload.standard_type,
+            standard_prefix=payload.standard_prefix,
+            operator=payload.operator or "system",
+        )
+        return Result.ok(data=data, msg="新增成功")
+    except ValueError as exc:
+        return Result.fail(msg=str(exc), code=400)
+    except Exception as exc:
+        return Result.fail(msg=str(exc), code=500)
+
+
+@router.put("/standard-data/{standard_id}", response_model=Result)
+async def update_standard_data(standard_id: int, payload: StandardDataUpdate):
+    """更新标准信息（仅允许编辑标准号、标准类型、标准前缀）"""
+    try:
+        data = standard_data_service.update_standard(
+            standard_id=standard_id,
+            standard_no=payload.standard_no,
+            standard_type=payload.standard_type,
+            standard_prefix=payload.standard_prefix,
+            operator=payload.operator or "system",
+        )
+        return Result.ok(data=data, msg="更新成功")
+    except ValueError as exc:
+        return Result.fail(msg=str(exc), code=400)
+    except Exception as exc:
+        return Result.fail(msg=str(exc), code=500)
+
+
+@router.delete("/standard-data/{standard_id}", response_model=Result)
+async def delete_standard_data(standard_id: int):
+    """删除标准信息"""
+    try:
+        standard_data_service.delete_standard(standard_id=standard_id)
+        return Result.ok(data={"id": standard_id}, msg="删除成功")
+    except ValueError as exc:
+        return Result.fail(msg=str(exc), code=400)
     except Exception as exc:
         return Result.fail(msg=str(exc), code=500)
 
@@ -135,10 +197,7 @@ async def convert_to_markdown(
         tables: 表格图片信息列表(从前端JSON body传入)
     """
     try:
-        if not tables:
-            return Result.fail(msg="缺少表格数据", code=400)
-        
-        print(f"[API] 接收到Markdown转换请求: task_id={task_id}, tables_count={len(tables)}")
+        print(f"[API] 接收到Markdown转换请求: task_id={task_id}, tables_count={len(tables or [])}")
         
         data = poc_service.convert_tables_to_markdown(
             task_id=task_id,
@@ -164,10 +223,7 @@ async def detect_standards(
         markdown_files: Markdown文件路径列表(从前端JSON body传入)
     """
     try:
-        if not markdown_files:
-            return Result.fail(msg="缺少Markdown文件路径", code=400)
-        
-        print(f"[API] 接收到标准检测请求: task_id={task_id}, files_count={len(markdown_files)}")
+        print(f"[API] 接收到标准检测请求: task_id={task_id}, files_count={len(markdown_files or [])}")
         
         data = poc_service.detect_standards(
             task_id=task_id,

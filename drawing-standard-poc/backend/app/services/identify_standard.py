@@ -142,16 +142,18 @@ class StandardCodeExtractor:
     # 构建正则表达式 - 按长度降序排列，避免短前缀匹配到长前缀的一部分
     _sorted_prefixes = sorted(VALID_PREFIXES, key=len, reverse=True)
     _prefix_pattern = '|'.join(re.escape(p) for p in _sorted_prefixes)
+    _left_boundary = r'(?:(?<![A-Za-z0-9])|(?<=\d{4}))'  # 允许前一条标准号年份后紧跟下一条前缀
+    _right_boundary = r'(?=(?:[^A-Za-z0-9]|$|(?:' + _prefix_pattern + r')))'  # 允许标准号后紧跟下一个前缀
 
     # 标准编号正则表达式
     # 匹配模式: 前缀 + 可选空格 + 数字(可带小数点) + - + 年份
     STANDARD_PATTERN = re.compile(
-        r'\b(' + _prefix_pattern + r')'
+        _left_boundary + r'(' + _prefix_pattern + r')'
         r'\s*'
         r'(\d+(?:\.\d+)?)'
         r'[-–—]'
         r'(\d{4})'
-        r'\b',
+        + _right_boundary,
         re.IGNORECASE
     )
 
@@ -167,24 +169,24 @@ class StandardCodeExtractor:
 
     # Pattern A: 前缀在波浪号后重复 (如 GB/T 150.1~GB/T 150.4-2011)
     MERGED_RANGE_REPEATED = re.compile(
-        r'\b(' + _pn + r')\s*'
+        _left_boundary + r'(' + _pn + r')\s*'
         r'(\d+)\.(\d+)\s*~\s*'
         r'(?:' + _pn + r')\s*'
         r'(\d+)\.(\d+)'
         r'((?:[,，]\s*(?:' + _pn + r')?\s*\d+\.\d+|[,，.]\s*\d+\.\d+)*)'
         r'\s*[-–—]\s*'
-        r'(\d{4})\b',
+        r'(\d{4})' + _right_boundary,
         re.IGNORECASE
     )
 
     # Pattern B: 前缀不重复 (如 NB/T 47013.1~47013.5-2015)
     MERGED_RANGE_SIMPLE = re.compile(
-        r'\b(' + _pn + r')\s*'
+        _left_boundary + r'(' + _pn + r')\s*'
         r'(\d+)\.(\d+)\s*~\s*'
         r'(\d+)\.(\d+)'
         r'((?:[,，]\s*(?:' + _pn + r')?\s*\d+\.\d+|[,，.]\s*\d+\.\d+)*)'
         r'\s*[-–—]\s*'
-        r'(\d{4})\b',
+        r'(\d{4})' + _right_boundary,
         re.IGNORECASE
     )
 
@@ -224,11 +226,14 @@ class StandardCodeExtractor:
         parser.feed(markdown_text)
 
         if parser.tables:
-            # 从 HTML 表格中提取
-            return self._extract_from_table(parser.tables[0])
-        else:
-            # 直接从文本中提取
-            return self._extract_from_text(markdown_text)
+            # 兼容多表场景：逐个表格提取，避免只处理第一张表导致漏检。
+            results = []
+            for table in parser.tables:
+                results.extend(self._extract_from_table(table))
+            return results
+
+        # 直接从文本中提取
+        return self._extract_from_text(markdown_text)
 
     def _extract_from_table(self, table_data: List[List[str]]) -> List[Dict]:
         """
