@@ -1239,6 +1239,22 @@ def apply_page_style() -> None:
             box-shadow: none;
             color: #1d4ed8;
         }
+        [class*="st-key-toggle_overall_compare_"] button[kind="secondary"],
+        [class*="st-key-toggle_overall_compare_"] button[data-testid="stBaseButton-secondary"],
+        [class*="st-key-toggle_overall_image_"] button[kind="secondary"],
+        [class*="st-key-toggle_overall_image_"] button[data-testid="stBaseButton-secondary"] {
+            min-height: 1.95rem;
+            padding: 0.08rem 0.6rem;
+            border-radius: 0.46rem;
+        }
+        [class*="st-key-toggle_overall_compare_"] button[kind="secondary"] p,
+        [class*="st-key-toggle_overall_compare_"] button[data-testid="stBaseButton-secondary"] p,
+        [class*="st-key-toggle_overall_image_"] button[kind="secondary"] p,
+        [class*="st-key-toggle_overall_image_"] button[data-testid="stBaseButton-secondary"] p {
+            font-size: 0.92rem;
+            line-height: 1.2;
+            margin: 0;
+        }
         [class*="st-key-edit_standard_"] button,
         [class*="st-key-delete_standard_"] button {
             min-width: 68px;
@@ -1704,6 +1720,7 @@ def render_markdown_results(results: list[dict[str, Any]]) -> None:
         if result.get("success"):
             md_content = result.get("md_content", "")
             patched = result.get("patched", False)
+            display_name = str(result.get("display_name") or "").strip() or f"表格 {table_index}"
 
             st.markdown(
                 f'<div id="{markdown_anchor_id(table_index)}" class="jump-anchor"></div>',
@@ -1713,7 +1730,7 @@ def render_markdown_results(results: list[dict[str, Any]]) -> None:
             if not markdown_expanded:
                 continue
 
-            with st.expander(f"表格 {table_index} {'(已优化)' if patched else ''}", expanded=False):
+            with st.expander(f"{display_name} {'(已优化)' if patched else ''}", expanded=False):
                 st.markdown(
                     f'<a class="jump-back-link" href="#{preview_anchor_id(table_index)}" title="点击跳转到对应表格">查看对应表格</a>',
                     unsafe_allow_html=True,
@@ -1725,9 +1742,9 @@ def render_markdown_results(results: list[dict[str, Any]]) -> None:
                         st.markdown(md_content)
 
                     st.download_button(
-                        label=f"📥 下载表格 {table_index} 的 Markdown",
+                        label=f"📥 下载 {display_name} 的 Markdown",
                         data=md_content,
-                        file_name=f"table_{table_index}.md",
+                        file_name=f"{display_name}.md",
                         mime="text/markdown",
                         key=f"download_table_{current_task_id}_{table_index}",
                     )
@@ -2675,6 +2692,10 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
         pdf_file = detail.get("original_filename") or "，".join(
             [file_name for file_name in detail.get("file_names", []) if file_name]
         )
+        overall_image_state_key = f"overall_image_inline_open_pdf_{detail['task_id']}"
+        open_overall_image_pdf = st.session_state.get(overall_image_state_key)
+        overall_compare_state_key = f"overall_compare_inline_open_pdf_{detail['task_id']}"
+        open_overall_compare_pdf = st.session_state.get(overall_compare_state_key)
         pdf_rows = detail.get("pdfs") or []
         if not pdf_rows:
             pdf_rows = [{"pdf_name": pdf_file or "-", "status": detail.get("current_step") or "-"}]
@@ -2695,15 +2716,10 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
             current_pdf_name = pdf.get("pdf_name") or pdf_file or "-"
             status_text = detail.get("current_step") or "-"
             can_open = can_open_overall_compare_for_pdf(detail, current_pdf_name)
-            overall_compare_link = build_resource_view_link(
-                "overall_compare",
-                detail["task_id"],
-                0,
-                pdf_name=current_pdf_name,
-            )
             annotated_image = first_annotated_image(detail, int(pdf.get("page") or 1))
-            annotated_image_link = build_resource_view_link("annotated_image", detail["task_id"], 0)
             can_open_annotated_image = bool(resolve_file_url(annotated_image))
+            is_image_open = open_overall_image_pdf == current_pdf_name
+            is_overall_open = open_overall_compare_pdf == current_pdf_name
 
             row_cols = st.columns(col_spec, gap="small")
             row_cols[0].markdown(f'<div style="{value_style}">{detail["task_id"]}</div>', unsafe_allow_html=True)
@@ -2712,19 +2728,58 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
             row_cols[3].markdown(f'<div style="{value_style}">{detail.get("completed_at") or "-"}</div>', unsafe_allow_html=True)
             row_cols[4].markdown(f'<div style="{value_style}">{status_text}</div>', unsafe_allow_html=True)
             if can_open_annotated_image:
-                row_cols[5].markdown(
-                    f'<a href="{annotated_image_link}" target="_blank" style="white-space:nowrap;">查看图片</a>',
-                    unsafe_allow_html=True,
-                )
+                image_button_label = "关闭图片" if is_image_open else "查看图片"
+                if row_cols[5].button(image_button_label, key=f"toggle_overall_image_{detail['task_id']}_{idx}"):
+                    st.session_state[overall_image_state_key] = None if is_image_open else current_pdf_name
+                    st.rerun()
             else:
                 row_cols[5].markdown(f'<div style="{value_style}">-</div>', unsafe_allow_html=True)
             if can_open:
-                row_cols[6].markdown(
-                    f'<a href="{overall_compare_link}" target="_blank" style="white-space:nowrap;">查看结果</a>',
-                    unsafe_allow_html=True,
-                )
+                button_label = "关闭结果" if is_overall_open else "查看结果"
+                if row_cols[6].button(button_label, key=f"toggle_overall_compare_{detail['task_id']}_{idx}"):
+                    st.session_state[overall_compare_state_key] = None if is_overall_open else current_pdf_name
+                    st.rerun()
             else:
                 row_cols[6].markdown(f'<div style="{value_style}">-</div>', unsafe_allow_html=True)
+
+        if open_overall_image_pdf:
+            selected_pdf_row = next(
+                (item for item in pdf_rows if (item.get("pdf_name") or pdf_file or "-") == open_overall_image_pdf),
+                {},
+            )
+            selected_page = int(selected_pdf_row.get("page") or 1)
+            annotated_image = first_annotated_image(detail, selected_page)
+            image_url = resolve_file_url(annotated_image)
+
+            st.divider()
+            st.markdown(f"#### 总识别图（{open_overall_image_pdf}）")
+            if image_url:
+                st.image(image_url, use_container_width=True)
+                st.caption(f"图片链接: {image_url}")
+            else:
+                st.info("当前任务暂无可展示的总识别图。")
+
+        if open_overall_compare_pdf:
+            st.divider()
+            st.markdown(f"#### 总标准结果对比（{open_overall_compare_pdf}）")
+            overall = detail.get("overall_standard_compare") or {}
+            rows = overall.get("results") or []
+
+            if rows:
+                table_rows = []
+                for item in rows:
+                    extracted = item.get("extracted") or {}
+                    matched = item.get("matched_library_entry") or {}
+                    table_rows.append(
+                        {
+                            "提取标准信息": extracted.get("original") or "-",
+                            "标准库信息": matched.get("original") or "-",
+                            "比对结果": item.get("status") or "-",
+                        }
+                    )
+                st.dataframe(table_rows, width="stretch", hide_index=True)
+            else:
+                st.info("当前任务暂无总标准对比结果。")
     with table_tab:
         tables = detail.get("tables", [])
         if tables:

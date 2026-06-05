@@ -1320,6 +1320,11 @@ class PocService:
             if not image_path:
                 print(f"[POC] 跳过表格 {idx}: 没有图片路径")
                 continue
+
+            table_display_name = table.get("display_name") or table.get("display_label") or f"表格{idx + 1}"
+            source_table_index = table.get("source_table_index") or table.get("original_table_index") or idx + 1
+            split_part = table.get("split_part")
+            split_total = table.get("split_total", 1)
             
             try:
                 # 调用mineru_img2md转换
@@ -1373,6 +1378,10 @@ class PocService:
                 
                 results.append({
                     "table_index": idx + 1,
+                    "display_name": table_display_name,
+                    "source_table_index": source_table_index,
+                    "split_part": split_part,
+                    "split_total": split_total,
                     "source_image": image_path,
                     "md_file": md_file,
                     "md_url": md_url,
@@ -1395,6 +1404,10 @@ class PocService:
                 print(f"[POC] 表格 {idx+1} 转换失败: {exc}")
                 results.append({
                     "table_index": idx + 1,
+                    "display_name": table_display_name,
+                    "source_table_index": source_table_index,
+                    "split_part": split_part,
+                    "split_total": split_total,
                     "source_image": image_path,
                     "error": str(exc),
                     "success": False,

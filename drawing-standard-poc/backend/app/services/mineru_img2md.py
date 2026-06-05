@@ -135,6 +135,43 @@ def _parse_pdf_to_md_json(do_parse, pdf_bytes, temp_dir, pdf_name):
     return md_content, json_content
 
 
+def _split_vertical_2(image, overlap_px=140):
+    """Split image into two vertical chunks with overlap for tall content continuity."""
+    h = image.height
+    split_y = h // 2
+    y1_bottom = min(h, split_y + overlap_px)
+    y2_top = max(0, split_y - overlap_px)
+    part1 = image.crop((0, 0, image.width, y1_bottom))
+    part2 = image.crop((0, y2_top, image.width, h))
+    return part1, part2
+
+
+def _should_split_image(
+    image_path,
+    resized_image,
+    size_mb_threshold=1.0,
+    height_threshold=3600,
+    aspect_threshold=2.0,
+):
+    """Decide split based on size + geometry; not only file size."""
+    file_size_mb = image_path.stat().st_size / (1024 * 1024)
+    aspect_ratio = resized_image.height / max(1, resized_image.width)
+    is_large_file = file_size_mb > size_mb_threshold
+    is_tall_image = resized_image.height >= height_threshold
+    is_extreme_aspect = aspect_ratio >= aspect_threshold
+    should_split = is_large_file and (is_tall_image or is_extreme_aspect)
+
+    return should_split, {
+        "file_size_mb": round(file_size_mb, 3),
+        "resized_width": resized_image.width,
+        "resized_height": resized_image.height,
+        "aspect_ratio": round(aspect_ratio, 3),
+        "size_mb_threshold": size_mb_threshold,
+        "height_threshold": height_threshold,
+        "aspect_threshold": aspect_threshold,
+    }
+
+
 def smart_dilate_v2(image, dilate_kernel=(2, 2)):
     """
     智能膨胀 V2:先膨胀,再修复表格线
@@ -197,6 +234,11 @@ def image_to_markdown(
         output_dir,
         dpi=300,
     scale=1.5,
+    auto_split=True,
+    split_size_mb_threshold=1.0,
+    split_height_threshold=3600,
+    split_aspect_threshold=2.0,
+    split_overlap_px=140,
 ):
     """
     将图片转换为 Markdown 和 JSON 文件
@@ -247,15 +289,62 @@ def image_to_markdown(
         # 步骤4~6: 封装 PDF 并识别
         pdf_image_tools.DEFAULT_PDF_IMAGE_DPI = dpi
 
-        buffer = BytesIO()
-        resized_image.save(buffer, format="PNG")
-        pdf_bytes = pdf_image_tools.images_bytes_to_pdf_bytes(buffer.getvalue())
-        merged_md_content, merged_json_content = _parse_pdf_to_md_json(
-            do_parse,
-            pdf_bytes,
-            temp_dir,
-            "input.pdf",
-        )
+        split_applied = False
+        split_reason = None
+        merged_md_content = None
+        merged_json_content = None
+
+        if auto_split:
+            split_applied, split_reason = _should_split_image(
+                image_path=image_path,
+                resized_image=resized_image,
+                size_mb_threshold=split_size_mb_threshold,
+                height_threshold=split_height_threshold,
+                aspect_threshold=split_aspect_threshold,
+            )
+
+        if split_applied:
+            # Large/tall mixed-content images are parsed in two parts, then merged.
+            part1, part2 = _split_vertical_2(resized_image, overlap_px=split_overlap_px)
+            part1_dir = temp_dir / "part1"
+            part2_dir = temp_dir / "part2"
+            part1_dir.mkdir(parents=True, exist_ok=True)
+            part2_dir.mkdir(parents=True, exist_ok=True)
+
+            part1_buf = BytesIO()
+            part1.save(part1_buf, format="PNG")
+            part1_pdf = pdf_image_tools.images_bytes_to_pdf_bytes(part1_buf.getvalue())
+
+            part2_buf = BytesIO()
+            part2.save(part2_buf, format="PNG")
+            part2_pdf = pdf_image_tools.images_bytes_to_pdf_bytes(part2_buf.getvalue())
+
+            md_1, json_1 = _parse_pdf_to_md_json(do_parse, part1_pdf, part1_dir, "part1.pdf")
+            md_2, json_2 = _parse_pdf_to_md_json(do_parse, part2_pdf, part2_dir, "part2.pdf")
+
+            merged_md_content = "\n\n".join([
+                "<!-- part1 -->",
+                md_1,
+                "<!-- part2 -->",
+                md_2,
+            ])
+            merged_json_content = {
+                "split_mode": "split2",
+                "split_overlap_px": split_overlap_px,
+                "split_reason": split_reason,
+                "part1": json_1,
+                "part2": json_2,
+            }
+        else:
+            buffer = BytesIO()
+            resized_image.save(buffer, format="PNG")
+            pdf_bytes = pdf_image_tools.images_bytes_to_pdf_bytes(buffer.getvalue())
+            merged_md_content, merged_json_content = _parse_pdf_to_md_json(
+                do_parse,
+                pdf_bytes,
+                temp_dir,
+                "input.pdf",
+            )
 
         # 步骤7: 先输出原始结果，再输出打补丁结果
         raw_md_target = output_dir / f"raw_{task_id}.md"
@@ -310,6 +399,8 @@ def image_to_markdown(
             'qwen_fixed_applied': qwen_fixed_applied,
             'dpi': dpi,
             'scale': scale,
+            'split_applied': split_applied,
+            'split_reason': split_reason,
         }
 
     finally:
@@ -402,6 +493,9 @@ def process_task(task_id, table_blocks_dir=None, output_base_dir=None, dpi=300, 
             if result.get('qwen_fixed_md_file'):
                 print(f"  Qwen修复文件: {result['qwen_fixed_md_file']}")
             print(f"  参数: dpi={result.get('dpi')} scale={result.get('scale')}")
+            print(f"  切分: {'是' if result.get('split_applied') else '否'}")
+            if result.get('split_reason'):
+                print(f"  切分依据: {result['split_reason']}")
 
             results.append({
                 'image': str(image_path),
@@ -415,6 +509,8 @@ def process_task(task_id, table_blocks_dir=None, output_base_dir=None, dpi=300, 
                 'qwen_fixed_applied': result.get('qwen_fixed_applied', False),
                 'dpi': result.get('dpi'),
                 'scale': result.get('scale'),
+                'split_applied': result.get('split_applied', False),
+                'split_reason': result.get('split_reason'),
                 'success': True
             })
 

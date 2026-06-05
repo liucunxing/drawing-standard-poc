@@ -749,6 +749,7 @@ class StandardCodeComparator:
             - prefix_match: 前缀是否匹配
             - main_number_match: 主编号是否匹配
             - exact_number_match: 完整编号是否匹配
+            - dot_insensitive_number_match: 去掉小数点后编号是否匹配
             - year_match: 年份是否匹配
             - number_similarity: 编号相似度（0-1）
             - levenshtein_ratio: 编辑距离相似度（0-1）
@@ -758,6 +759,7 @@ class StandardCodeComparator:
             'prefix_match': False,
             'main_number_match': False,
             'exact_number_match': False,
+            'dot_insensitive_number_match': False,
             'year_match': False,
             'number_similarity': 0.0,
             'levenshtein_ratio': 0.0
@@ -822,12 +824,21 @@ class StandardCodeComparator:
         # 主编号比对 (忽略小数点)
         main_num1 = num1.split('.')[0]
         main_num2 = num2.split('.')[0]
+        compact_num1 = num1.replace('.', '')
+        compact_num2 = num2.replace('.', '')
 
         if num1 == num2:
             score += 50
             details['exact_number_match'] = True
             details['main_number_match'] = True
             details['number_similarity'] = 1.0
+        elif compact_num1 and compact_num1 == compact_num2:
+            # OCR 常漏识别小数点，例如 470184 应匹配标准库中的 47018.4。
+            # 这类情况不能算“完全符合”，只能视为“较为相似”。
+            score += 30
+            details['main_number_match'] = True
+            details['dot_insensitive_number_match'] = True
+            details['number_similarity'] = max(details['number_similarity'], 0.95)
         elif main_num1 == main_num2:
             score += 30
             details['main_number_match'] = True
