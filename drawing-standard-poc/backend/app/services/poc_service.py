@@ -48,6 +48,40 @@ class PocService:
         return fallback_index
 
     @staticmethod
+    def _table_display_name_from_path(path: str, fallback_index: int) -> str:
+        text = str(path or "")
+        match = re.search(r"_table_(\d+)(?:_part_(\d+)|_safe50_(upper|lower))?", text)
+        if not match:
+            return f"表格{fallback_index}"
+
+        table_index = int(match.group(1))
+        part_index = match.group(2)
+        legacy_part = match.group(3)
+        if part_index:
+            return f"表格{table_index}-{int(part_index)}"
+        if legacy_part:
+            return f"表格{table_index}-{'1' if legacy_part == 'upper' else '2'}"
+        return f"表格{table_index}"
+
+    def _load_annotated_images(self, task_id: str) -> list[Dict[str, Any]]:
+        debug_dir = self.table_layout_service.table_blocks_dir / task_id / "paddleocr_vl_debug"
+        if not debug_dir.exists():
+            return []
+
+        images: list[Dict[str, Any]] = []
+        for path in sorted(debug_dir.glob("page_*_annotated.png")):
+            match = re.search(r"page_(\d+)_annotated", path.name)
+            page_number = int(match.group(1)) if match else len(images) + 1
+            images.append(
+                {
+                    "page": page_number,
+                    "image_path": str(path),
+                    "image_url": self._local_path_to_url(str(path)),
+                }
+            )
+        return images
+
+    @staticmethod
     def _highlight_markdown_by_backend_rules(markdown_content: str, detected_standards: list[str] | None = None) -> str:
         """使用后端标准提取规则生成高亮版Markdown，不改动原始内容。"""
         content = str(markdown_content or "")
@@ -221,6 +255,10 @@ class PocService:
                         "table_index": row.get("table_index") or 0,
                         "image_path": image_path,
                         "image_url": self._local_path_to_url(image_path) if image_path else "",
+                        "display_name": self._table_display_name_from_path(
+                            image_path,
+                            int(row.get("table_index") or 0),
+                        ),
                         "label": "table",
                         "score": 0.0,
                     }
@@ -1050,6 +1088,7 @@ class PocService:
                     {
                         "page": int(row.get("page_number") or 0),
                         "table_index": table_index,
+                        "display_name": self._table_display_name_from_path(image_path, table_index),
                         "label": "table",
                         "score": 0.0,
                         "bbox": [],
@@ -1137,6 +1176,7 @@ class PocService:
                 else [],
                 "tables": tables,
                 "standards": standards,
+                "annotated_images": self._load_annotated_images(task_id),
                 "overall_standard_compare": overall_standard_compare,
                 "raw_json": raw_snapshot,
             }
@@ -1188,10 +1228,16 @@ class PocService:
                     
             for page in result.get('pages', []):
                 page_idx = page.get('page', 0)
-                table_crop_paths = page.get('table_crop_paths', [])
-                total_tables += len(table_crop_paths)
+                table_crop_items = page.get('table_crop_items') or [
+                    {"image_path": table_path}
+                    for table_path in page.get('table_crop_paths', [])
+                ]
+                total_tables += len(table_crop_items)
                         
-                for table_path in table_crop_paths:
+                for table_crop in table_crop_items:
+                    table_path = str(table_crop.get("image_path") or "")
+                    if not table_path:
+                        continue
                     table_index = len(tables) + 1
                     # 将本地路径转换为URL路径
                     url_path = self._local_path_to_url(table_path)
@@ -1199,6 +1245,11 @@ class PocService:
                     tables.append({
                         "page": page_idx,
                         "table_index": table_index,
+                        "display_name": table_crop.get("display_label")
+                        or self._table_display_name_from_path(table_path, table_index),
+                        "source_table_index": table_crop.get("original_table_index"),
+                        "split_part": table_crop.get("split_part"),
+                        "split_total": table_crop.get("split_total", 1),
                         "image_path": table_path,  # 本地路径
                         "image_url": url_path,     # 可访问的URL
                         "label": "table",
@@ -1226,6 +1277,7 @@ class PocService:
                 "total_pages": result.get('total_pages', 0),
                 "total_tables": total_tables,
                 "tables": tables,
+                "annotated_images": self._load_annotated_images(task_id),
                 "page_images_dir": result.get('page_images_dir', ''),
                 "debug_dir": result.get('debug_dir', ''),
             }

@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import fitz
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 # ============================================
 # 禁用 oneDNN/PIR，避免 Paddle 3.x 运行时转换错误
@@ -153,15 +153,17 @@ class TableLayoutService4Batch:
                 src_image_path=infer_img_path,
                 dst_image_path=page_png_path,
             )
+            draw_boxes = self._assign_table_annotation_labels(page_png_path, draw_boxes)
             self._draw_annotation(page_png_path, draw_boxes, annotated_path)
 
             table_crops_dir = debug_dir / f"page_{page_idx:03d}_tables"
-            table_crop_paths = self._save_table_crops_from_boxes(
+            table_crop_items = self._save_table_crops_from_boxes(
                 page_image_path=page_png_path,
                 boxes=draw_boxes,
                 out_dir=table_crops_dir,
                 page_idx=page_idx,
             )
+            table_crop_paths = [item["image_path"] for item in table_crop_items]
 
             print(f"[testP] [4/4] page {page_idx}: annotated image -> {annotated_path}")
 
@@ -172,6 +174,7 @@ class TableLayoutService4Batch:
                     "infer_image_path": str(infer_img_path),
                     "annotation_image_path": str(annotated_path),
                     "table_crops_dir": str(table_crops_dir),
+                    "table_crop_items": table_crop_items,
                     "table_crop_paths": table_crop_paths,
                     "detected_tables": len(table_crop_paths),
                     "detected_blocks": len(boxes),
@@ -264,15 +267,17 @@ class TableLayoutService4Batch:
                         src_image_path=infer_img_path,
                         dst_image_path=page_png_path,
                     )
+                    draw_boxes = self._assign_table_annotation_labels(page_png_path, draw_boxes)
                     self._draw_annotation(page_png_path, draw_boxes, annotated_path)
 
                     table_crops_dir = debug_dir / f"page_{page_idx:03d}_tables"
-                    table_crop_paths = self._save_table_crops_from_boxes(
+                    table_crop_items = self._save_table_crops_from_boxes(
                         page_image_path=page_png_path,
                         boxes=draw_boxes,
                         out_dir=table_crops_dir,
                         page_idx=page_idx,
                     )
+                    table_crop_paths = [item["image_path"] for item in table_crop_items]
 
                     combo_summary["pages"].append(
                         {
@@ -281,6 +286,7 @@ class TableLayoutService4Batch:
                             "infer_image_path": str(infer_img_path),
                             "annotation_image_path": str(annotated_path),
                             "table_crops_dir": str(table_crops_dir),
+                            "table_crop_items": table_crop_items,
                             "table_crop_paths": table_crop_paths,
                             "detected_tables": len(table_crop_paths),
                             "detected_blocks": len(boxes),
@@ -668,9 +674,44 @@ class TableLayoutService4Batch:
             return 0.0
         return inter / float(union)
 
+    def _assign_table_annotation_labels(self, image_path: Path, boxes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not boxes:
+            return boxes
+
+        img_w, img_h = Image.open(image_path).size
+        labeled: List[Dict[str, Any]] = []
+        table_index = 0
+        for item in boxes:
+            copied = dict(item)
+            label = str(copied.get("label", "other")).lower()
+            score = float(copied.get("score", 0.0) or 0.0)
+            bbox = self._clip_bbox4(copied.get("bbox"), img_w, img_h)
+            if "table" in label and score > self.table_min_score and bbox is not None:
+                table_index += 1
+                copied["table_index"] = table_index
+                copied["display_label"] = f"表格{table_index}"
+                copied["bbox"] = list(bbox)
+            labeled.append(copied)
+        return labeled
+
+    def _annotation_font(self) -> ImageFont.ImageFont:
+        font_candidates = [
+            Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "msyh.ttc",
+            Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "simhei.ttf",
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        ]
+        for font_path in font_candidates:
+            try:
+                if font_path.exists():
+                    return ImageFont.truetype(str(font_path), 18)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
     def _draw_annotation(self, image_path: Path, boxes: List[Dict[str, Any]], out_path: Path) -> None:
         img = Image.open(image_path).convert("RGB")
         draw = ImageDraw.Draw(img)
+        font = self._annotation_font()
 
         for item in boxes:
             bbox = item.get("bbox", [])
@@ -679,10 +720,18 @@ class TableLayoutService4Batch:
             x1, y1, x2, y2 = [int(v) for v in bbox]
             label = str(item.get("label", "other")).lower()
             score = float(item.get("score", 0.0) or 0.0)
+            if "table" in label and score <= self.table_min_score:
+                continue
             color = CATEGORY_COLORS.get(label, CATEGORY_COLORS["other"])
             draw.rectangle((x1, y1, x2, y2), outline=color, width=3)
-            # Show 3 decimals to avoid visual confusion like 0.504 being displayed as 0.50.
-            draw.text((x1 + 2, max(0, y1 - 16)), f"{label} {score:.3f}", fill=color)
+            text = str(item.get("display_label") or "").strip()
+            if not text:
+                # Show 3 decimals to avoid visual confusion like 0.504 being displayed as 0.50.
+                text = f"{label} {score:.3f}"
+            try:
+                draw.text((x1 + 2, max(0, y1 - 22)), text, fill=color, font=font)
+            except UnicodeEncodeError:
+                draw.text((x1 + 2, max(0, y1 - 16)), f"table {item.get('table_index', '')}".strip(), fill=color)
 
         img.save(out_path)
 
@@ -692,7 +741,7 @@ class TableLayoutService4Batch:
             boxes: List[Dict[str, Any]],
             out_dir: Path,
             page_idx: int,
-    ) -> List[str]:
+    ) -> List[Dict[str, Any]]:
         if not boxes:
             return []
 
@@ -707,7 +756,7 @@ class TableLayoutService4Batch:
             except Exception:
                 pass
 
-        table_paths: List[str] = []
+        table_items: List[Dict[str, Any]] = []
         table_index = 0
         for item in boxes:
             label = str(item.get("label", "other")).lower()
@@ -725,28 +774,37 @@ class TableLayoutService4Batch:
             if x2 - x1 < 20 or y2 - y1 < 20:
                 continue
 
-            table_index += 1
+            table_index = int(item.get("table_index") or (table_index + 1))
             crop_name = f"page_{page_idx:03d}_table_{table_index:03d}.png"
             crop_path = out_dir / crop_name
             image.crop((x1, y1, x2, y2)).save(crop_path)
-            table_paths.append(str(crop_path))
+            table_item = {
+                "image_path": str(crop_path),
+                "page": page_idx,
+                "table_index": table_index,
+                "original_table_index": table_index,
+                "display_label": f"表格{table_index}",
+                "split_part": None,
+                "split_total": 1,
+            }
+            table_items.append(table_item)
 
             # 管口表特殊处理：检测长宽比并智能切割
-            sub_table_paths = self._detect_and_split_nozzle_table(
+            sub_table_items = self._detect_and_split_nozzle_table(
                 table_image_path=crop_path,
                 out_dir=out_dir,
                 page_idx=page_idx,
                 table_index=table_index,
             )
-            if sub_table_paths:
-                table_paths.pop()
+            if sub_table_items:
+                table_items.pop()
                 try:
                     crop_path.unlink()
                 except Exception:
                     pass
-            table_paths.extend(sub_table_paths)
+            table_items.extend(sub_table_items)
 
-        return table_paths
+        return table_items
 
     def _expand_table_top_to_boundary(self, gray: Any, x1: int, y1: int, x2: int, y2: int) -> int:
         if y1 <= 0 or x2 - x1 < 40 or y2 - y1 < 40:
@@ -904,7 +962,7 @@ class TableLayoutService4Batch:
             out_dir: Path,
             page_idx: int,
             table_index: int,
-    ) -> List[str]:
+    ) -> List[Dict[str, Any]]:
         """
         管口表切割：对于超长表格（长宽比>2.0），按 50% 目标位寻找安全切点并保留上下两部分。
 
@@ -915,7 +973,7 @@ class TableLayoutService4Batch:
             table_index: 一级表格索引
 
         Returns:
-            切割后的子表格图片路径列表
+            切割后的子表格图片信息列表
         """
         try:
             # 1. 检查长宽比
@@ -1028,7 +1086,7 @@ class TableLayoutService4Batch:
             page_idx: int,
             table_index: int,
             method: str,
-    ) -> List[str]:
+    ) -> List[Dict[str, Any]]:
         """
         保存切割后的上下两部分表格。
 
@@ -1043,31 +1101,53 @@ class TableLayoutService4Batch:
             method: 切割方法标识（用于目录命名）
 
         Returns:
-            子表格图片路径列表
+            子表格图片信息列表
         """
         # 校验切割位置
         if split_y < height * 0.05 or split_y > height * 0.8:
             print(f"[testP] [管口表检测] 切割位置不合理: {split_y}/{height}，跳过")
             return []
 
-        sub_table_paths: List[str] = []
+        sub_table_items: List[Dict[str, Any]] = []
 
         # 上部：标题区域（不包含管口表标题）
-        upper_path = out_dir / f"page_{page_idx:03d}_table_{table_index:03d}_{method}_upper.png"
+        upper_path = out_dir / f"page_{page_idx:03d}_table_{table_index:03d}_part_1.png"
         img.crop((0, 0, width, split_y)).save(upper_path)
-        sub_table_paths.append(str(upper_path))
+        sub_table_items.append(
+            {
+                "image_path": str(upper_path),
+                "page": page_idx,
+                "table_index": table_index,
+                "original_table_index": table_index,
+                "display_label": f"表格{table_index}-1",
+                "split_part": 1,
+                "split_total": 2,
+                "split_method": method,
+            }
+        )
 
         # 下部：数据区域（包含管口表标题）
-        lower_path = out_dir / f"page_{page_idx:03d}_table_{table_index:03d}_{method}_lower.png"
+        lower_path = out_dir / f"page_{page_idx:03d}_table_{table_index:03d}_part_2.png"
         img.crop((0, split_y, width, height)).save(lower_path)
-        sub_table_paths.append(str(lower_path))
+        sub_table_items.append(
+            {
+                "image_path": str(lower_path),
+                "page": page_idx,
+                "table_index": table_index,
+                "original_table_index": table_index,
+                "display_label": f"表格{table_index}-2",
+                "split_part": 2,
+                "split_total": 2,
+                "split_method": method,
+            }
+        )
 
         print(
             f"[testP] [管口表检测] page_{page_idx:03d}_table_{table_index:03d}: "
             f"成功切割为上下两部分 (split_y={split_y}, method={method})"
         )
 
-        return sub_table_paths
+        return sub_table_items
 
     def _read_bool_env(self, key: str, default: bool) -> bool:
         raw = os.getenv(key)

@@ -533,6 +533,10 @@ def normalize_table(table: dict[str, Any], fallback_index: int) -> dict[str, Any
         "bbox": table.get("bbox", []),
         "image_path": table.get("image_path") or table.get("crop_path") or "",
         "image_url": table.get("image_url") or "",
+        "display_name": table.get("display_name") or table.get("display_label") or "",
+        "source_table_index": table.get("source_table_index") or table.get("original_table_index"),
+        "split_part": table.get("split_part"),
+        "split_total": table.get("split_total", 1),
         "raw_markdown_content": table.get("raw_markdown_content") or "",
         "markdown_content": table.get("markdown_content") or "",
         "highlighted_markdown_content": table.get("highlighted_markdown_content") or "",
@@ -612,6 +616,7 @@ def normalize_task_detail(source: dict[str, Any]) -> dict[str, Any]:
         "pdfs": pdfs,
         "tables": tables,
         "standards": standards,
+        "annotated_images": data.get("annotated_images") or [],
         "overall_standard_compare": data.get("overall_standard_compare") or {},
         "raw_json": data.get("raw_json") or stable_raw_json(source),
         "status": status_text,
@@ -687,6 +692,10 @@ def merge_backend_task_detail(
     merged["pdfs"] = backend_detail["pdfs"] or existing_detail.get("pdfs", [])
     merged["tables"] = backend_detail["tables"] or existing_detail.get("tables", [])
     merged["standards"] = backend_detail["standards"] or existing_detail.get("standards", [])
+    merged["annotated_images"] = (
+        backend_detail.get("annotated_images")
+        or existing_detail.get("annotated_images", [])
+    )
     merged["overall_standard_compare"] = (
         backend_detail.get("overall_standard_compare")
         or existing_detail.get("overall_standard_compare", {})
@@ -697,7 +706,16 @@ def merge_backend_task_detail(
     return merged
 
 
-def refresh_single_task_detail_from_backend(task_id: str) -> bool:
+def refresh_single_task_detail_from_backend(task_id: str, force: bool = False, ttl_seconds: float = 3.0) -> bool:
+    detail_sync_ts = st.session_state.setdefault("task_detail_sync_ts", {})
+    now_ts = time.time()
+    if (
+        not force
+        and st.session_state.get("task_details", {}).get(task_id)
+        and (now_ts - float(detail_sync_ts.get(task_id, 0.0))) < ttl_seconds
+    ):
+        return True
+
     result = get_task_status_from_backend(task_id)
     if not result.get("success"):
         return False
@@ -706,6 +724,7 @@ def refresh_single_task_detail_from_backend(task_id: str) -> bool:
     existing_detail = st.session_state.get("task_details", {}).get(task_id)
     merged = merge_backend_task_detail(existing_detail, backend_data)
     st.session_state.task_details[task_id] = merged
+    detail_sync_ts[task_id] = now_ts
     upsert_task_summary(normalize_task_summary(merged))
     return True
 
@@ -1056,6 +1075,8 @@ def initialize_state() -> None:
         st.session_state.upload_action_started_at = 0.0
     if "last_backend_sync_ts" not in st.session_state:
         st.session_state.last_backend_sync_ts = 0.0
+    if "task_detail_sync_ts" not in st.session_state:
+        st.session_state.task_detail_sync_ts = {}
     if "current_page" not in st.session_state:
         st.session_state.current_page = "总览工作台"
     if "pending_page" in st.session_state:
@@ -1116,25 +1137,6 @@ def apply_page_style() -> None:
         }
         div[data-testid="stMetricValue"] { color: #0f172a; font-size: 1.62rem; }
         .section-note { color: #64748b; font-size: 0.92rem; margin-top: -0.3rem; }
-        .page-loading-mask {
-            align-items: center;
-            background: rgba(255, 255, 255, 0.7);
-            display: flex;
-            inset: 0;
-            justify-content: center;
-            position: fixed;
-            z-index: 9999;
-        }
-        .page-loading-card {
-            background: #ffffff;
-            border: 1px solid #dbe2ea;
-            border-radius: 10px;
-            box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
-            color: #0f172a;
-            font-size: 1.06rem;
-            font-weight: 600;
-            padding: 14px 22px;
-        }
         .collapsible-section-title {
             color: #0f172a;
             font-size: 1.72rem;
@@ -1315,19 +1317,7 @@ def render_overview(
     page_name = "总览工作台"
     should_sync = st.session_state.get("last_synced_page") != page_name
     if should_sync:
-        loading_placeholder = st.empty()
-        loading_placeholder.markdown(
-            """
-            <div class="page-loading-mask">
-                <div class="page-loading-card">加载数据中...</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        # 仅在切入总览页时主动同步，避免页面内任意按钮都触发遮罩。
-        maybe_sync_tasks_from_backend(force=True, limit=100)
-        loading_placeholder.empty()
+        maybe_sync_tasks_from_backend(limit=100)
     st.session_state.last_synced_page = page_name
 
     tasks = st.session_state.tasks
@@ -1627,6 +1617,13 @@ def resolve_table_index(item: dict[str, Any], fallback_index: int) -> int:
         return fallback_index
 
 
+def table_display_name(table: dict[str, Any], fallback_index: int) -> str:
+    display_name = str(table.get("display_name") or "").strip()
+    if display_name:
+        return display_name
+    return f"表格{resolve_table_index(table, fallback_index)}"
+
+
 def preview_anchor_id(table_index: int) -> str:
     return f"table-preview-{table_index}"
 
@@ -1635,8 +1632,8 @@ def markdown_anchor_id(table_index: int) -> str:
     return f"markdown-result-{table_index}"
 
 
-def render_preview_title_link(page: int, table_index: int, has_markdown: bool) -> None:
-    title_text = f"第{page}页 - 表格 {table_index}"
+def render_preview_title_link(page: int, table_index: int, has_markdown: bool, display_name: str = "") -> None:
+    title_text = f"第{page}页 - {display_name or f'表格{table_index}'}"
     if has_markdown:
         st.markdown(
             (
@@ -1673,6 +1670,7 @@ def render_table_previews(tables: list[dict[str, Any]]) -> None:
 
     for fallback_index, table in enumerate(tables, start=1):
         table_index = resolve_table_index(table, fallback_index)
+        display_name = table_display_name(table, fallback_index)
         image_url = table.get("image_url", "")
         page = table.get("page", 0)
 
@@ -1684,7 +1682,7 @@ def render_table_previews(tables: list[dict[str, Any]]) -> None:
         if not previews_expanded:
             continue
 
-        render_preview_title_link(page, table_index, table_index in markdown_table_indexes)
+        render_preview_title_link(page, table_index, table_index in markdown_table_indexes, display_name)
         if image_url:
             full_url = f"{BACKEND_BASE_URL}{image_url}"
             st.image(full_url, use_container_width=True)
@@ -2167,7 +2165,7 @@ def clear_resource_view_query() -> None:
 def is_standalone_resource_view() -> bool:
     return (
         get_query_param("standalone") == "1"
-        and get_query_param("view") in {"table_image", "table_markdown", "table_result", "standard_compare", "overall_compare"}
+        and get_query_param("view") in {"table_image", "table_markdown", "table_result", "standard_compare", "overall_compare", "annotated_image"}
     )
 
 
@@ -2246,6 +2244,36 @@ def resolve_table_image_url(table: dict[str, Any]) -> str:
         return ""
 
 
+def resolve_file_url(resource: dict[str, Any]) -> str:
+    image_url = resource.get("image_url", "")
+    if image_url:
+        return f"{BACKEND_BASE_URL}{image_url}" if image_url.startswith("/") else image_url
+
+    image_path = resource.get("image_path", "")
+    if not image_path:
+        return ""
+
+    try:
+        relative_path = Path(image_path).resolve().relative_to(BACKEND_TMP_DIR.resolve())
+        return f"{BACKEND_BASE_URL}/api/files/{relative_path.as_posix()}"
+    except Exception:
+        return ""
+
+
+def first_annotated_image(detail: dict[str, Any], page: int = 1) -> dict[str, Any]:
+    images = detail.get("annotated_images") or []
+    if images:
+        return next((item for item in images if int(item.get("page") or 0) == page), images[0])
+
+    task_id = detail.get("task_id", "")
+    if not task_id:
+        return {}
+    fallback_path = BACKEND_TMP_DIR / "table_blocks" / task_id / "paddleocr_vl_debug" / f"page_{page:03d}_annotated.png"
+    if fallback_path.exists():
+        return {"page": page, "image_path": str(fallback_path)}
+    return {}
+
+
 def build_markdown_lookup(task_id: str) -> dict[int, dict[str, Any]]:
     lookup: dict[int, dict[str, Any]] = {}
     detail = st.session_state.get("task_details", {}).get(task_id, {})
@@ -2322,6 +2350,7 @@ def build_standard_compare_groups(detail: dict[str, Any]) -> list[dict[str, Any]
                 table_index,
                 {
                     "table_index": table_index,
+                    "display_name": table_display_name(table_lookup.get(table_index, {}), table_index),
                     "source_pdf": "-",
                     "page": "-",
                     "total": 0,
@@ -2352,6 +2381,7 @@ def build_standard_compare_groups(detail: dict[str, Any]) -> list[dict[str, Any]
                 table_index,
                 {
                     "table_index": table_index,
+                    "display_name": table_display_name(table_lookup.get(table_index, {}), table_index),
                     "source_pdf": "-",
                     "page": "-",
                     "total": 0,
@@ -2388,6 +2418,7 @@ def build_standard_compare_groups(detail: dict[str, Any]) -> list[dict[str, Any]
         if table:
             group["source_pdf"] = table.get("pdf_name") or detail.get("original_filename") or "-"
             group["page"] = table.get("page", "-")
+            group["display_name"] = table_display_name(table, table_index)
         else:
             group["source_pdf"] = detail.get("original_filename") or "-"
 
@@ -2396,7 +2427,7 @@ def build_standard_compare_groups(detail: dict[str, Any]) -> list[dict[str, Any]
 
 def render_table_resource_detail_view(task_details: dict[str, dict[str, Any]]) -> bool:
     view = get_query_param("view")
-    if view not in {"table_image", "table_markdown", "table_result", "standard_compare", "overall_compare"}:
+    if view not in {"table_image", "table_markdown", "table_result", "standard_compare", "overall_compare", "annotated_image"}:
         return False
 
     task_id = get_query_param("task_id")
@@ -2412,6 +2443,21 @@ def render_table_resource_detail_view(task_details: dict[str, dict[str, Any]]) -
         if st.button("返回结果列表", key="back_result_list_invalid"):
             clear_resource_view_query()
             st.rerun()
+        return True
+
+    if view == "annotated_image":
+        if st.button("返回结果列表", key=f"back_result_list_{view}_{task_id}"):
+            clear_resource_view_query()
+            st.rerun()
+
+        annotated_image = first_annotated_image(detail)
+        image_url = resolve_file_url(annotated_image)
+        st.subheader(f"任务 {task_id} / 总识别图")
+        if image_url:
+            st.image(image_url, use_container_width=True)
+            st.caption(f"图片链接: {image_url}")
+        else:
+            st.warning("未找到可访问的总识别图。")
         return True
 
     if view == "overall_compare":
@@ -2481,7 +2527,8 @@ def render_table_resource_detail_view(task_details: dict[str, dict[str, Any]]) -
         clear_resource_view_query()
         st.rerun()
 
-    st.subheader(f"任务 {task_id} / 表格 {table_index}")
+    display_name = table_display_name(table, table_index)
+    st.subheader(f"任务 {task_id} / {display_name}")
     source_pdf = table.get("pdf_name") or detail.get("original_filename") or "-"
     st.caption(f"来源PDF: {source_pdf} | 页码: {table.get('page', '-')}")
 
@@ -2632,20 +2679,17 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
         if not pdf_rows:
             pdf_rows = [{"pdf_name": pdf_file or "-", "status": detail.get("current_step") or "-"}]
 
-        pending_notice_pdf = st.session_state.get("pending_pdf_compare_notice") or ""
-        if pending_notice_pdf:
-            render_pdf_compare_not_ready_dialog(pending_notice_pdf)
-
-        header_style = "font-size:0.96rem;font-weight:700;line-height:1.25;margin-bottom:0.1rem;"
-        value_style = "font-size:0.92rem;line-height:1.35;"
-        col_spec = [0.25, 0.16, 0.18, 0.16, 0.13, 0.12]
+        header_style = "font-size:0.96rem;font-weight:700;line-height:1.25;margin-bottom:0.1rem;white-space:nowrap;"
+        value_style = "font-size:0.92rem;line-height:1.35;white-space:nowrap;"
+        col_spec = [0.22, 0.15, 0.16, 0.15, 0.10, 0.12, 0.1]
         header_cols = st.columns(col_spec, gap="small")
         header_cols[0].markdown(f'<div style="{header_style}">任务号</div>', unsafe_allow_html=True)
         header_cols[1].markdown(f'<div style="{header_style}">PDF 文件</div>', unsafe_allow_html=True)
         header_cols[2].markdown(f'<div style="{header_style}">任务开始时间</div>', unsafe_allow_html=True)
         header_cols[3].markdown(f'<div style="{header_style}">任务结束时间</div>', unsafe_allow_html=True)
         header_cols[4].markdown(f'<div style="{header_style}">状态</div>', unsafe_allow_html=True)
-        header_cols[5].markdown(f'<div style="{header_style}">总标准结果对比</div>', unsafe_allow_html=True)
+        header_cols[5].markdown(f'<div style="{header_style}">总识别图</div>', unsafe_allow_html=True)
+        header_cols[6].markdown(f'<div style="{header_style}">总标准结果对比</div>', unsafe_allow_html=True)
 
         for idx, pdf in enumerate(pdf_rows, start=1):
             current_pdf_name = pdf.get("pdf_name") or pdf_file or "-"
@@ -2657,6 +2701,9 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
                 0,
                 pdf_name=current_pdf_name,
             )
+            annotated_image = first_annotated_image(detail, int(pdf.get("page") or 1))
+            annotated_image_link = build_resource_view_link("annotated_image", detail["task_id"], 0)
+            can_open_annotated_image = bool(resolve_file_url(annotated_image))
 
             row_cols = st.columns(col_spec, gap="small")
             row_cols[0].markdown(f'<div style="{value_style}">{detail["task_id"]}</div>', unsafe_allow_html=True)
@@ -2664,15 +2711,20 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
             row_cols[2].markdown(f'<div style="{value_style}">{detail.get("started_at") or "-"}</div>', unsafe_allow_html=True)
             row_cols[3].markdown(f'<div style="{value_style}">{detail.get("completed_at") or "-"}</div>', unsafe_allow_html=True)
             row_cols[4].markdown(f'<div style="{value_style}">{status_text}</div>', unsafe_allow_html=True)
-            if can_open:
+            if can_open_annotated_image:
                 row_cols[5].markdown(
-                    f'<a href="{overall_compare_link}" target="_blank">查看结果</a>',
+                    f'<a href="{annotated_image_link}" target="_blank" style="white-space:nowrap;">查看图片</a>',
                     unsafe_allow_html=True,
                 )
             else:
-                if row_cols[5].button("查看结果", key=f"overall_pdf_guard_{detail['task_id']}_{idx}"):
-                    st.session_state.pending_pdf_compare_notice = str(current_pdf_name)
-                    st.rerun()
+                row_cols[5].markdown(f'<div style="{value_style}">-</div>', unsafe_allow_html=True)
+            if can_open:
+                row_cols[6].markdown(
+                    f'<a href="{overall_compare_link}" target="_blank" style="white-space:nowrap;">查看结果</a>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                row_cols[6].markdown(f'<div style="{value_style}">-</div>', unsafe_allow_html=True)
     with table_tab:
         tables = detail.get("tables", [])
         if tables:
@@ -2684,6 +2736,7 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
 
             for idx, table in enumerate(tables, start=1):
                 table_index = resolve_table_index(table, idx)
+                display_name = table_display_name(table, idx)
                 source_pdf = table.get("pdf_name") or detail.get("original_filename") or "-"
                 result_link = build_resource_view_link("table_result", detail["task_id"], table_index)
 
@@ -2692,7 +2745,7 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
                 row_cols[1].write(source_pdf)
                 row_cols[2].write(table.get("page", "-"))
                 row_cols[3].markdown(
-                    f'<a href="{result_link}" target="_blank">表格{table_index}</a>',
+                    f'<a href="{result_link}" target="_blank">{display_name}</a>',
                     unsafe_allow_html=True,
                 )
 
@@ -2715,13 +2768,14 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
 
             for group in groups:
                 table_index = group["table_index"]
+                display_name = group.get("display_name") or f"表格{table_index}"
                 table_image_link = build_resource_view_link("table_image", detail["task_id"], table_index)
                 standard_compare_link = build_resource_view_link("standard_compare", detail["task_id"], table_index)
                 row_cols = st.columns([0.2, 0.13, 0.1, 0.1, 0.09, 0.09, 0.09, 0.08, 0.12])
                 row_cols[0].write(detail["task_id"])
                 row_cols[1].write(group.get("source_pdf", "-"))
                 row_cols[2].markdown(
-                    f'<a href="{table_image_link}" target="_blank">表格{table_index}</a>',
+                    f'<a href="{table_image_link}" target="_blank">{display_name}</a>',
                     unsafe_allow_html=True,
                 )
                 row_cols[3].write(group.get("total", 0))
@@ -2750,18 +2804,7 @@ def render_results(
     page_name = "结果查看"
     should_sync = st.session_state.get("last_synced_page") != page_name
     if should_sync:
-        loading_placeholder = st.empty()
-        loading_placeholder.markdown(
-            """
-            <div class="page-loading-mask">
-                <div class="page-loading-card">加载数据中...</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        # 仅在切入结果页时主动同步，避免页面内按钮触发整页加载感。
-        maybe_sync_tasks_from_backend(force=True, limit=100)
-        loading_placeholder.empty()
+        maybe_sync_tasks_from_backend(limit=100)
     st.session_state.last_synced_page = page_name
 
     tasks = st.session_state.tasks
@@ -2816,7 +2859,7 @@ def render_results(
 
     # 在进入结果页、切换任务、或缓存明细不完整时，主动拉取任务完整详情。
     if should_sync or task_id != previous_selected_task_id or detail_incomplete:
-        refresh_single_task_detail_from_backend(task_id)
+        refresh_single_task_detail_from_backend(task_id, force=detail_incomplete)
     task_details = st.session_state.task_details
     detail = task_details[task_id]
 
@@ -3068,7 +3111,7 @@ def main() -> None:
         return
 
     # Ensure deep-links from table result rows always render in the results page.
-    if get_query_param("view") in {"table_image", "table_markdown", "table_result", "standard_compare", "overall_compare"}:
+    if get_query_param("view") in {"table_image", "table_markdown", "table_result", "standard_compare", "overall_compare", "annotated_image"}:
         st.session_state.current_page = "结果查看"
 
     page = render_sidebar()
