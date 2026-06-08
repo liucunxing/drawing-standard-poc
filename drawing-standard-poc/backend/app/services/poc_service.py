@@ -1114,7 +1114,8 @@ class PocService:
                 sc.match_score,
                 sc.message,
                 sc.matched_standard_no,
-                ti.table_index
+                ti.table_index,
+                ti.image_path
             FROM standard_extracted se
             LEFT JOIN standard_comparison sc ON sc.standard_extracted_id = se.id
             LEFT JOIN table_markdown tm ON tm.id = se.table_markdown_id
@@ -1131,13 +1132,14 @@ class PocService:
                 score = int(row.get("match_score") or 0)
                 confidence = max(0.0, min(1.0, score / 100.0))
                 table_index = int(row.get("table_index") or 0)
+                source_table = self._table_display_name_from_path(row.get("image_path") or "", table_index) if table_index > 0 else ""
                 standards.append(
                     {
                         "standard_no": row.get("original_text") or "",
                         "matched_standard": row.get("matched_standard_no") or "未匹配",
                         "status": row.get("match_status") or "待识别",
                         "result_type": row.get("match_status") or "待识别",
-                        "source_table": f"表格 {table_index}" if table_index > 0 else "",
+                        "source_table": source_table,
                         "confidence": confidence,
                         "suggestion": row.get("message") or "",
                     }
@@ -1321,8 +1323,9 @@ class PocService:
                 print(f"[POC] 跳过表格 {idx}: 没有图片路径")
                 continue
 
-            table_display_name = table.get("display_name") or table.get("display_label") or f"表格{idx + 1}"
-            source_table_index = table.get("source_table_index") or table.get("original_table_index") or idx + 1
+            original_table_index = table.get("table_index") or table.get("index") or (idx + 1)
+            table_display_name = table.get("display_name") or table.get("display_label") or f"表格{original_table_index}"
+            source_table_index = table.get("source_table_index") or table.get("original_table_index") or original_table_index
             split_part = table.get("split_part")
             split_total = table.get("split_total", 1)
             
@@ -1330,8 +1333,15 @@ class PocService:
                 # 调用mineru_img2md转换
                 print(f"[POC] 转换表格 {idx+1}/{len(tables)}: {Path(image_path).name}")
                 
-                # 生成该表格的task_id
-                table_task_id = f"{task_id}_table_{idx+1}"
+                # 基于原始图片文件名生成markdown文件名，保持编号一致
+                image_stem = Path(image_path).stem  # e.g. page_003_table_003_part_1
+                table_suffix_match = re.search(r"table_\d+(?:_part_\d+|_safe50_(?:upper|lower))?", image_stem)
+                if table_suffix_match:
+                    table_task_id = f"{task_id}_{table_suffix_match.group(0)}"
+                else:
+                    table_task_id = f"{task_id}_table_{original_table_index:03d}"
+                    if split_part:
+                        table_task_id = f"{table_task_id}_part_{split_part}"
                 
                 result = image_to_markdown(
                     image_path=Path(image_path),
@@ -1377,7 +1387,7 @@ class PocService:
                     print(f"[POC] 表格 {idx+1} 使用 Qwen 修复版本作为主输出")
                 
                 results.append({
-                    "table_index": idx + 1,
+                    "table_index": original_table_index,
                     "display_name": table_display_name,
                     "source_table_index": source_table_index,
                     "split_part": split_part,
@@ -1403,7 +1413,7 @@ class PocService:
             except Exception as exc:
                 print(f"[POC] 表格 {idx+1} 转换失败: {exc}")
                 results.append({
-                    "table_index": idx + 1,
+                    "table_index": original_table_index,
                     "display_name": table_display_name,
                     "source_table_index": source_table_index,
                     "split_part": split_part,
@@ -1607,6 +1617,7 @@ class PocService:
                     continue
 
                 table_index = self._parse_table_index_from_path(md_file_path, idx + 1)
+                table_display_name = self._table_display_name_from_path(md_file_path, table_index)
                 table_markdown_id = markdown_id_map.get(table_index)
                 if not table_markdown_id:
                     print(f"[POC] 跳过标准入库，未找到table_markdown记录: task_id={task_id}, table_index={table_index}")
@@ -1633,6 +1644,9 @@ class PocService:
                     # 添加文件信息
                     result_dict['markdown_file'] = str(md_file_path)
                     result_dict['table_index'] = table_index
+                    result_dict['table_display_name'] = table_display_name
+                    result_dict['source_table'] = table_display_name
+                    result_dict['table_group_key'] = table_display_name.replace('表格', '').replace(' ', '')
                     
                     # 统计
                     total_standards += 1
@@ -1675,6 +1689,9 @@ class PocService:
                             cell_text
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
+                    # 保证同一 task 下不同 markdown 文件的标准号不会因 row_index 重复而冲突。
+                    # 之前 row_index 仅使用 result_idx，会导致表1/表2第1条同标准号触发唯一键冲突。
+                    row_index = int(table_markdown_id) * 1000 + result_idx
                     extracted_args = (
                         task_id,
                         table_markdown_id,
@@ -1684,7 +1701,7 @@ class PocService:
                         extracted_number,
                         extracted.get("year") or "",
                         1 if extracted.get("has_T") else 0,
-                        result_idx,
+                        row_index,
                         0,
                         extracted.get("original") or "",
                     )

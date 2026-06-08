@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime
 import getpass
+from html import escape
 from pathlib import Path
 import re
 import time
@@ -58,6 +59,15 @@ BACKEND_RESULT_CONTRACT = """
 
 def now_text() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def truncate_display_text(value: Any, max_chars: int = 26) -> tuple[str, str]:
+    text = str(value or "-")
+    if len(text) <= max_chars:
+        return text, text
+    if max_chars <= 3:
+        return text[:max_chars], text
+    return f"{text[: max_chars - 3]}...", text
 
 
 def upload_pdf_to_backend(pdf_file, task_name: str = None) -> dict[str, Any]:
@@ -1720,7 +1730,7 @@ def render_markdown_results(results: list[dict[str, Any]]) -> None:
         if result.get("success"):
             md_content = result.get("md_content", "")
             patched = result.get("patched", False)
-            display_name = str(result.get("display_name") or "").strip() or f"表格 {table_index}"
+            display_name = table_display_name(result, fallback_index)
 
             st.markdown(
                 f'<div id="{markdown_anchor_id(table_index)}" class="jump-anchor"></div>',
@@ -1730,7 +1740,7 @@ def render_markdown_results(results: list[dict[str, Any]]) -> None:
             if not markdown_expanded:
                 continue
 
-            with st.expander(f"{display_name} {'(已优化)' if patched else ''}", expanded=False):
+            with st.expander(display_name, expanded=False):
                 st.markdown(
                     f'<a class="jump-back-link" href="#{preview_anchor_id(table_index)}" title="点击跳转到对应表格">查看对应表格</a>',
                     unsafe_allow_html=True,
@@ -1788,17 +1798,30 @@ def render_standard_detection_results(detection_data: dict[str, Any]) -> None:
     if not details_expanded:
         return
 
-    table_groups: dict[int, list[dict[str, Any]]] = {}
+    table_groups: dict[str, list[dict[str, Any]]] = {}
+    table_labels: dict[str, str] = {}
     for result in results:
-        table_idx = result.get("table_index", 0)
-        table_groups.setdefault(table_idx, []).append(result)
+        table_key = (
+            parse_table_group_key(result.get("table_group_key"))
+            or parse_table_group_key(result.get("source_table"))
+            or parse_table_group_key(result.get("table_display_name"))
+            or parse_table_group_key(result.get("markdown_file"))
+            or parse_table_group_key(result.get("table_index"))
+            or "0"
+        )
+        table_groups.setdefault(table_key, []).append(result)
+        table_label = (
+            str(result.get("source_table") or "").strip()
+            or str(result.get("table_display_name") or "").strip()
+            or f"表{table_key}"
+        )
+        table_labels.setdefault(table_key, table_label)
 
-    for table_idx in sorted(table_groups.keys()):
-        table_results = table_groups[table_idx]
-        md_file = table_results[0].get("markdown_file", "")
-        md_filename = Path(md_file).name if md_file else f"表格 {table_idx}"
+    for table_key in sorted(table_groups.keys(), key=parse_table_group_sort_key):
+        table_results = table_groups[table_key]
+        display_name = table_labels.get(table_key, f"表{table_key}")
 
-        with st.expander(f"📄 {md_filename} ({len(table_results)} 个标准号)", expanded=False):
+        with st.expander(f"📄 {display_name} ({len(table_results)} 个标准号)", expanded=False):
             for index, result in enumerate(table_results, 1):
                 extracted = result.get("extracted", {})
                 matched = result.get("matched_library_entry")
@@ -2340,6 +2363,39 @@ def parse_table_index_from_text(value: Any) -> int:
     return int(match.group(1)) if match else 0
 
 
+def parse_table_group_key(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    md_match = re.search(r"_table_(\d+)(?:_part_(\d+)|_safe50_(upper|lower))?", text)
+    if md_match:
+        base = md_match.group(1)
+        part = md_match.group(2)
+        legacy = md_match.group(3)
+        if part:
+            return f"{int(base)}-{int(part)}"
+        if legacy:
+            return f"{int(base)}-{'1' if legacy == 'upper' else '2'}"
+        return str(int(base))
+
+    match = re.search(r"(\d+)(?:\s*[-_]\s*(\d+))?", text)
+    if not match:
+        return ""
+    if match.group(2):
+        return f"{int(match.group(1))}-{int(match.group(2))}"
+    return str(int(match.group(1)))
+
+
+def parse_table_group_sort_key(group_key: str) -> tuple[int, int]:
+    match = re.fullmatch(r"(\d+)(?:-(\d+))?", str(group_key or ""))
+    if not match:
+        return (10**9, 10**9)
+    base = int(match.group(1))
+    part = int(match.group(2)) if match.group(2) else 0
+    return (base, part)
+
+
 def build_standard_compare_groups(detail: dict[str, Any]) -> list[dict[str, Any]]:
     task_id = detail.get("task_id", "")
     tables = detail.get("tables", [])
@@ -2348,7 +2404,7 @@ def build_standard_compare_groups(detail: dict[str, Any]) -> list[dict[str, Any]
         for idx, table in enumerate(tables, start=1)
     }
 
-    groups: dict[int, dict[str, Any]] = {}
+    groups: dict[str, dict[str, Any]] = {}
 
     detection_data = st.session_state.get("standard_detection_results")
     use_detection_data = bool(
@@ -2359,15 +2415,28 @@ def build_standard_compare_groups(detail: dict[str, Any]) -> list[dict[str, Any]
 
     if use_detection_data:
         for result in detection_data.get("results", []):
-            table_index = parse_table_index_from_text(result.get("table_index"))
+            table_key = (
+                parse_table_group_key(result.get("table_group_key"))
+                or parse_table_group_key(result.get("source_table"))
+                or parse_table_group_key(result.get("table_display_name"))
+                or parse_table_group_key(result.get("markdown_file"))
+                or parse_table_group_key(result.get("table_index"))
+            )
+            table_index = parse_table_index_from_text(table_key)
             if table_index <= 0:
                 continue
 
             group = groups.setdefault(
-                table_index,
+                table_key,
                 {
                     "table_index": table_index,
-                    "display_name": table_display_name(table_lookup.get(table_index, {}), table_index),
+                    "table_key": table_key,
+                    "display_name": (
+                        str(result.get("source_table") or "").strip()
+                        or str(result.get("table_display_name") or "").strip()
+                        or table_display_name(table_lookup.get(table_index, {}), table_index)
+                        or f"表格{table_key}"
+                    ),
                     "source_pdf": "-",
                     "page": "-",
                     "total": 0,
@@ -2393,12 +2462,18 @@ def build_standard_compare_groups(detail: dict[str, Any]) -> list[dict[str, Any]
             group["results"].append(result)
     else:
         for idx, item in enumerate(detail.get("standards", []), start=1):
-            table_index = parse_table_index_from_text(item.get("source_table")) or idx
+            table_key = parse_table_group_key(item.get("source_table")) or str(idx)
+            table_index = parse_table_index_from_text(table_key) or idx
             group = groups.setdefault(
-                table_index,
+                table_key,
                 {
                     "table_index": table_index,
-                    "display_name": table_display_name(table_lookup.get(table_index, {}), table_index),
+                    "table_key": table_key,
+                    "display_name": (
+                        str(item.get("source_table") or "").strip()
+                        or table_display_name(table_lookup.get(table_index, {}), table_index)
+                        or f"表格{table_key}"
+                    ),
                     "source_pdf": "-",
                     "page": "-",
                     "total": 0,
@@ -2430,16 +2505,18 @@ def build_standard_compare_groups(detail: dict[str, Any]) -> list[dict[str, Any]
                 }
             )
 
-    for table_index, group in groups.items():
+    for _, group in groups.items():
+        table_index = group.get("table_index", 0)
         table = table_lookup.get(table_index)
         if table:
             group["source_pdf"] = table.get("pdf_name") or detail.get("original_filename") or "-"
             group["page"] = table.get("page", "-")
-            group["display_name"] = table_display_name(table, table_index)
+            if not str(group.get("display_name") or "").strip():
+                group["display_name"] = table_display_name(table, table_index)
         else:
             group["source_pdf"] = detail.get("original_filename") or "-"
 
-    return [groups[key] for key in sorted(groups.keys())]
+    return [groups[key] for key in sorted(groups.keys(), key=parse_table_group_sort_key)]
 
 
 def render_table_resource_detail_view(task_details: dict[str, dict[str, Any]]) -> bool:
@@ -2720,10 +2797,18 @@ def render_result_tabs(detail: dict[str, Any]) -> None:
             can_open_annotated_image = bool(resolve_file_url(annotated_image))
             is_image_open = open_overall_image_pdf == current_pdf_name
             is_overall_open = open_overall_compare_pdf == current_pdf_name
+            task_id_display, task_id_full = truncate_display_text(detail.get("task_id") or "-")
+            pdf_name_display, pdf_name_full = truncate_display_text(current_pdf_name)
 
             row_cols = st.columns(col_spec, gap="small")
-            row_cols[0].markdown(f'<div style="{value_style}">{detail["task_id"]}</div>', unsafe_allow_html=True)
-            row_cols[1].markdown(f'<div style="{value_style}">{current_pdf_name}</div>', unsafe_allow_html=True)
+            row_cols[0].markdown(
+                f'<div style="{value_style}" title="{escape(task_id_full)}">{escape(task_id_display)}</div>',
+                unsafe_allow_html=True,
+            )
+            row_cols[1].markdown(
+                f'<div style="{value_style}" title="{escape(pdf_name_full)}">{escape(pdf_name_display)}</div>',
+                unsafe_allow_html=True,
+            )
             row_cols[2].markdown(f'<div style="{value_style}">{detail.get("started_at") or "-"}</div>', unsafe_allow_html=True)
             row_cols[3].markdown(f'<div style="{value_style}">{detail.get("completed_at") or "-"}</div>', unsafe_allow_html=True)
             row_cols[4].markdown(f'<div style="{value_style}">{status_text}</div>', unsafe_allow_html=True)
@@ -2997,6 +3082,7 @@ def render_standard_library() -> None:
             value=STANDARD_LIBRARY_OPERATOR,
             disabled=True,
         )
+        action_col.markdown('<div style="height: 1.7rem;"></div>', unsafe_allow_html=True)
         search_submitted = action_col.form_submit_button("查询", type="primary")
 
     if search_submitted:

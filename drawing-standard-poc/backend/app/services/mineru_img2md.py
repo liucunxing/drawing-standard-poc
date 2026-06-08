@@ -33,6 +33,33 @@ os.environ['MINERU_MODEL_SOURCE'] = 'local'
 os.environ['MINERU_TABLE_MODEL'] = 'struct_eqtable'
 
 
+_STD_PREFIXES = [
+    'AQ', 'C/TE', 'GB', 'GB/T', 'GBZ/T', 'HG', 'HG/T',
+    'JB', 'JB/T', 'NB/T', 'Q/SH', 'SH/T', 'SY/T',
+    'T/ES', 'TSG', 'YB/T'
+]
+_STD_PREFIX_PATTERN = '|'.join(sorted((re.escape(p) for p in _STD_PREFIXES), key=len, reverse=True))
+_PREFIX_NUMBER_UNDERSCORE_RE = re.compile(
+    r'(' + _STD_PREFIX_PATTERN + r')\s*_(\s*\d)',
+    re.IGNORECASE,
+)
+_PREFIX_LEADING_STUCK_RE = re.compile(
+    r'(?<=[A-Za-z0-9])(' + _STD_PREFIX_PATTERN + r')(?=\s*\d)',
+    re.IGNORECASE,
+)
+
+
+def _normalize_prefix_number_separator(text):
+    """Normalize OCR '_' between standard prefix and number.
+
+    Example: HG/T_20634-2009 -> HG/T 20634-2009
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    patched = _PREFIX_NUMBER_UNDERSCORE_RE.sub(r'\1 \2', text)
+    return _PREFIX_LEADING_STUCK_RE.sub(r' \1', patched)
+
+
 def _normalize_standard_prefix_in_text(text):
     """Normalize common OCR prefix variants like HG/* and NB/* to the expected standard forms."""
     if not isinstance(text, str) or not text:
@@ -48,7 +75,8 @@ def _apply_flange_standard_patch_md(md_content):
     if not isinstance(md_content, str) or not md_content:
         return md_content, False
 
-    patched = md_content.replace("□", "口")
+    patched = _normalize_prefix_number_separator(md_content)
+    patched = patched.replace("□", "口")
     if "法兰标准" in patched:
         patched = _normalize_standard_prefix_in_text(patched)
 
@@ -85,18 +113,29 @@ def _apply_flange_standard_patch_json(json_obj):
     return patched, patched != json_obj
 
 
-def _contains_nozzle_table_md(md_content):
-    """Detect '管口表' even when OCR inserts spaces or HTML tags between characters."""
+def _should_apply_qwen_nozzle_fix(md_content):
+    """Trigger Qwen fix when markdown looks like nozzle table content.
+
+    Conditions:
+    1) Contains '管口表' (compatible with OCR spaces/HTML tags), or
+    2) Contains both '法兰标准' and '公称压力' (for images missing the title).
+    """
     if not isinstance(md_content, str) or not md_content:
         return False
 
     if re.search(r"管\s*口\s*表", md_content):
         return True
 
+    if re.search(r"法\s*兰\s*标\s*准", md_content) and re.search(r"公\s*称\s*压\s*力", md_content):
+        return True
+
     visible_text = re.sub(r"<[^>]+>", "", md_content)
     visible_text = visible_text.replace("&nbsp;", " ")
     visible_text = re.sub(r"\s+", "", visible_text)
-    return "管口表" in visible_text
+    if "管口表" in visible_text:
+        return True
+
+    return ("法兰标准" in visible_text) and ("公称压力" in visible_text)
 
 
 def _parse_pdf_to_md_json(do_parse, pdf_bytes, temp_dir, pdf_name):
@@ -369,13 +408,13 @@ def image_to_markdown(
         )
 
         # 步骤8: 管口表 Qwen 后处理
-        # 判断 patched 版本的 md 是否包含"管口表"关键字(兼容空格/HTML标签分隔)
+        # 条件: 包含"管口表"，或同时包含"法兰标准"和"公称压力"(兼容空格/HTML标签分隔)
         qwen_fixed_md_content = None
         qwen_fixed_applied = False
         qwen_fixed_md_target = None
 
-        if _contains_nozzle_table_md(patched_md_content):
-            print(f"[img2md] 检测到管口表, 调用 Qwen 后处理修复列错位...")
+        if _should_apply_qwen_nozzle_fix(patched_md_content):
+            print(f"[img2md] 检测到管口表特征, 调用 Qwen 后处理修复列错位...")
             qwen_fixed_md_content = fix_nozzle_table_md(patched_md_content)
             qwen_fixed_applied = qwen_fixed_md_content != patched_md_content
 
@@ -386,7 +425,7 @@ def image_to_markdown(
             else:
                 print(f"[img2md] Qwen 返回内容与原始一致, 未生成修复文件")
         else:
-            print(f"[img2md] 未检测到管口表, 跳过 Qwen 后处理")
+            print(f"[img2md] 未命中管口表触发条件, 跳过 Qwen 后处理")
 
         return {
             'md_file': str(raw_md_target),

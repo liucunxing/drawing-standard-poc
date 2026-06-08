@@ -33,7 +33,7 @@ CATEGORY_COLORS: Dict[str, tuple[int, int, int]] = {
     "text": (0, 255, 0),
     "title": (255, 140, 0),
     "figure": (255, 0, 255),
-    "table": (30, 144, 255),
+    "table": (255, 0, 0),
     "formula": (220, 20, 60),
     "chart": (255, 215, 0),
     "seal": (255, 105, 180),
@@ -65,7 +65,7 @@ class TableLayoutService4Batch:
         self.layout_model_name = os.getenv("PADDLEOCR_LAYOUT_MODEL_NAME", "PP-DocLayout_plus-L")
         self.layout_model_dir = self._resolve_layout_model_dir()
 
-        self.default_render_zoom = float(os.getenv("PADDLEOCR_VL_RENDER_ZOOM", "4.17"))
+        self.default_render_zoom = float(os.getenv("PADDLEOCR_VL_RENDER_ZOOM", "3.2"))
         self.default_max_pages = int(os.getenv("PADDLEOCR_VL_MAX_PAGES", "1"))
         self.infer_max_side = int(os.getenv("PADDLEOCR_VL_INFER_MAX_SIDE", "2900"))
 
@@ -723,7 +723,8 @@ class TableLayoutService4Batch:
             if "table" in label and score <= self.table_min_score:
                 continue
             color = CATEGORY_COLORS.get(label, CATEGORY_COLORS["other"])
-            draw.rectangle((x1, y1, x2, y2), outline=color, width=3)
+            line_width = 9 if "table" in label else 3
+            draw.rectangle((x1, y1, x2, y2), outline=color, width=line_width)
             text = str(item.get("display_label") or "").strip()
             if not text:
                 # Show 3 decimals to avoid visual confusion like 0.504 being displayed as 0.50.
@@ -1169,14 +1170,14 @@ class TableLayoutService4Batch:
 
 
 if __name__ == "__main__":
-    local_pdf = Path(r"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\25.918-1 A1.pdf")
+    local_pdf = Path(r"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\1810-V-303-03.371-1-A1-Rev.0.pdf")
 
     service = TableLayoutService4Batch()
 
     result = service.run_multi_combo_experiment(
         pdf_path=local_pdf,
         zoom_values=[3.2], #[4.17],
-        infer_max_side_values=[2800],#[2900],
+        infer_max_side_values=[2900],#[2900],
         max_pages=1
     )
 

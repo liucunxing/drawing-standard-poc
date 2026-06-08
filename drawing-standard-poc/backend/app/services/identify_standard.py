@@ -146,11 +146,14 @@ class StandardCodeExtractor:
     _right_boundary = r'(?=(?:[^A-Za-z0-9]|$|(?:' + _prefix_pattern + r')))'  # 允许标准号后紧跟下一个前缀
 
     # 标准编号正则表达式
-    # 匹配模式: 前缀 + 可选空格 + 数字(可带小数点) + - + 年份
+    # 匹配模式: 前缀 + 可选空格 + 数字(可带小数点) + 可选字母后缀 + - + 年份
+    # 示例: HG/T20263 B-2009, HG/T20263B-2009
     STANDARD_PATTERN = re.compile(
         _left_boundary + r'(' + _prefix_pattern + r')'
         r'\s*'
         r'(\d+(?:\.\d+)?)'
+        r'(?:\s*([A-Za-z]+))?'
+        r'\s*'
         r'[-–—]'
         r'(\d{4})'
         + _right_boundary,
@@ -190,6 +193,27 @@ class StandardCodeExtractor:
         re.IGNORECASE
     )
 
+    # 前缀与编号之间误插入下划线时的标准化规则
+    # 例如: HG/T_20634-2009 -> HG/T 20634-2009
+    PREFIX_NUMBER_UNDERSCORE_PATTERN = re.compile(
+        r'(' + _prefix_pattern + r')\s*_(\s*\d)',
+        re.IGNORECASE
+    )
+
+    # 前缀前存在粘连字符时的标准化规则
+    # 例如: 2bHG/T20615-2009 -> 2b HG/T20615-2009
+    PREFIX_LEADING_STUCK_PATTERN = re.compile(
+        r'(?<=[A-Za-z0-9])(' + _prefix_pattern + r')(?=\s*\d)',
+        re.IGNORECASE
+    )
+
+    def _normalize_prefix_number_separator(self, text: str) -> str:
+        """规范化标准前缀与编号之间的分隔符，去掉误识别下划线。"""
+        if not isinstance(text, str) or not text:
+            return text
+        patched = self.PREFIX_NUMBER_UNDERSCORE_PATTERN.sub(r'\1 \2', text)
+        return self.PREFIX_LEADING_STUCK_PATTERN.sub(r' \1', patched)
+
     def extract_from_markdown(self, markdown_text: str) -> List[Dict]:
         """
         从 Markdown 文本中提取标准编号（核心入口方法）
@@ -221,6 +245,9 @@ class StandardCodeExtractor:
                 'standard_type': str  # 标准类型（同 prefix）
             }
         """
+        # 先做文本标准化，修复前缀与编号之间的下划线误识别
+        markdown_text = self._normalize_prefix_number_separator(markdown_text)
+
         # 先尝试解析 HTML 表格
         parser = TableParser()
         parser.feed(markdown_text)
@@ -358,7 +385,8 @@ class StandardCodeExtractor:
             'prefix': found_prefix,  # 使用标准格式的前缀
             'has_T': has_T,
             'number': match.group(2),
-            'year': match.group(3),
+            'number_suffix': (match.group(3) or '').upper(),
+            'year': match.group(4),
             'standard_type': found_prefix
         }
 
@@ -586,7 +614,7 @@ class StandardCodeComparator:
                 prefix=found_prefix,
                 standard_type=found_prefix,
                 number=match.group(2),
-                year=match.group(3),
+                year=match.group(4),
                 has_T=has_T
             )
         return None
@@ -624,6 +652,17 @@ class StandardCodeComparator:
             year=extracted_code['year'],
             has_T=extracted_code['has_T']
         )
+
+        # 业务规则: 编号和年份之间存在字母后缀(如 HG/T20263 B-2009)时，统一判为“较为相似”。
+        # 该规则仅作用于此类特殊格式，不改变其他比对分支。
+        if extracted_code.get('number_suffix'):
+            return MatchResult(
+                status=MatchStatus.SIMILAR,
+                score=60,
+                extracted=extracted,
+                matched_library_entry=None,
+                message=f"较为相似: 特殊后缀标准 {extracted.original}"
+            )
 
         if not self.library:
             return MatchResult(
