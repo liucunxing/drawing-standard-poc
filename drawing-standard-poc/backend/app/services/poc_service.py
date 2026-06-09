@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import json
 from datetime import datetime
 from pathlib import Path
 import re
@@ -41,6 +42,80 @@ class PocService:
         return record
 
     @staticmethod
+    def _safe_upload_filename(filename: str) -> str:
+        safe_name = Path(str(filename or "upload.pdf")).name.strip() or "upload.pdf"
+        return re.sub(r"[\\/:*?\"<>|]+", "_", safe_name)
+
+    @staticmethod
+    def _read_upload_manifest(upload_dir: Path) -> list[Dict[str, Any]]:
+        manifest_path = upload_dir / "files_manifest.json"
+        if not manifest_path.exists():
+            return []
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        files = data.get("files") if isinstance(data, dict) else data
+        return files if isinstance(files, list) else []
+
+    def _get_task_file_records(self, task: Dict[str, Any]) -> list[Dict[str, Any]]:
+        file_path = str(task.get("file_path") or "").strip()
+        original_filename = str(task.get("original_filename") or "").strip()
+        if not file_path:
+            return []
+
+        path_obj = Path(file_path)
+        if path_obj.is_dir():
+            manifest_records = self._read_upload_manifest(path_obj)
+            if manifest_records:
+                return manifest_records
+            return [
+                {
+                    "original_filename": item.name,
+                    "saved_filename": item.name,
+                    "file_path": str(item),
+                    "file_size": item.stat().st_size if item.exists() else 0,
+                }
+                for item in sorted(path_obj.glob("*.pdf"))
+            ]
+
+        return [
+            {
+                "original_filename": original_filename or path_obj.name,
+                "saved_filename": path_obj.name,
+                "file_path": file_path,
+                "file_size": int(task.get("file_size") or 0),
+            }
+        ]
+
+    @staticmethod
+    def _summarize_filenames(file_names: list[str]) -> str:
+        names = [name for name in file_names if str(name or "").strip()]
+        if not names:
+            return "upload.pdf"
+        if len(names) == 1:
+            return names[0]
+        return f"{names[0]} 等{len(names)}个文件"
+
+    def _task_file_names(self, task: Dict[str, Any]) -> list[str]:
+        records = self._get_task_file_records(task)
+        names = [str(item.get("original_filename") or item.get("saved_filename") or "") for item in records]
+        return [name for name in names if name]
+
+    def _pdf_name_from_resource_path(self, task_id: str, resource_path: str, task: Dict[str, Any] | None = None) -> str:
+        match = re.search(rf"{re.escape(task_id)}[\\/]+pdf_(\d+)[\\/]", str(resource_path or ""))
+        if not match:
+            return ""
+        file_index = int(match.group(1))
+        if not task:
+            task = self.get_task_status(task_id)
+        records = self._get_task_file_records(task or {})
+        if 1 <= file_index <= len(records):
+            record = records[file_index - 1]
+            return str(record.get("original_filename") or record.get("saved_filename") or "")
+        return ""
+
+    @staticmethod
     def _parse_table_index_from_path(path: str, fallback_index: int) -> int:
         match = re.search(r"_table_(\d+)", str(path))
         if match:
@@ -65,8 +140,27 @@ class PocService:
 
     def _load_annotated_images(self, task_id: str) -> list[Dict[str, Any]]:
         debug_dir = self.table_layout_service.table_blocks_dir / task_id / "paddleocr_vl_debug"
+        task = self.get_task_status(task_id)
+        records = self._get_task_file_records(task or {})
+
         if not debug_dir.exists():
-            return []
+            images: list[Dict[str, Any]] = []
+            for file_index, record in enumerate(records, start=1):
+                nested_debug_dir = self.table_layout_service.table_blocks_dir / task_id / f"pdf_{file_index:03d}" / "paddleocr_vl_debug"
+                if not nested_debug_dir.exists():
+                    continue
+                for path in sorted(nested_debug_dir.glob("page_*_annotated.png")):
+                    match = re.search(r"page_(\d+)_annotated", path.name)
+                    page_number = int(match.group(1)) if match else len(images) + 1
+                    images.append(
+                        {
+                            "pdf_name": record.get("original_filename") or record.get("saved_filename") or "",
+                            "page": page_number,
+                            "image_path": str(path),
+                            "image_url": self._local_path_to_url(str(path)),
+                        }
+                    )
+            return images
 
         images: list[Dict[str, Any]] = []
         for path in sorted(debug_dir.glob("page_*_annotated.png")):
@@ -247,10 +341,12 @@ class PocService:
             with SQLManager() as db:
                 rows = db.get_list(sql, (task_id,)) or []
             tables: list[Dict[str, Any]] = []
+            task = self.get_task_status(task_id)
             for row in rows:
                 image_path = row.get("image_path") or ""
                 tables.append(
                     {
+                        "pdf_name": self._pdf_name_from_resource_path(task_id, image_path, task),
                         "page": row.get("page_number") or 1,
                         "table_index": row.get("table_index") or 0,
                         "image_path": image_path,
@@ -279,7 +375,8 @@ class PocService:
                 sc.match_score,
                 sc.message,
                 sc.matched_standard_no,
-                ti.table_index
+                ti.table_index,
+                ti.image_path
             FROM standard_extracted se
             LEFT JOIN standard_comparison sc ON sc.standard_extracted_id = se.id
             LEFT JOIN table_markdown tm ON tm.id = se.table_markdown_id
@@ -291,11 +388,12 @@ class PocService:
             with SQLManager() as db:
                 rows = db.get_list(sql, (task_id,)) or []
             standards: list[Dict[str, Any]] = []
+            task = self.get_task_status(task_id)
             for row in rows:
                 match_status = row.get("match_status") or "不存在"
                 standards.append(
                     {
-                        "pdf_name": original_filename,
+                        "pdf_name": self._pdf_name_from_resource_path(task_id, row.get("image_path") or "", task) or original_filename,
                         "standard_no": row.get("original_text") or "",
                         "matched_standard": row.get("matched_standard_no") or "未匹配",
                         "status": match_status,
@@ -371,6 +469,49 @@ class PocService:
                 db.modify("DELETE FROM standard_extracted WHERE task_id = %s", (task_id,))
         except Exception as exc:
             print(f"[POC] 清理标准结果异常: {exc}")
+
+    def _get_task_result_summary_from_db(self, task_id: str) -> dict[str, Any]:
+        summary = {
+            "table_count": 0,
+            "standard_count": 0,
+            "exact_match_count": 0,
+            "year_mismatch_count": 0,
+            "similar_count": 0,
+            "not_found_count": 0,
+        }
+        try:
+            with SQLManager() as db:
+                table_row = db.get_one("SELECT COUNT(*) AS count FROM table_image WHERE task_id = %s", (task_id,)) or {}
+                summary["table_count"] = int(table_row.get("count") or 0)
+                rows = db.get_list(
+                    """
+                    SELECT se.original_text, sc.match_status
+                    FROM standard_extracted se
+                    LEFT JOIN standard_comparison sc ON sc.standard_extracted_id = se.id
+                    WHERE se.task_id = %s
+                    """,
+                    (task_id,),
+                ) or []
+
+            unique_standards: set[str] = set()
+            for row in rows:
+                original_text = str(row.get("original_text") or "").strip()
+                unique_key = "".join(original_text.upper().split())
+                if unique_key:
+                    unique_standards.add(unique_key)
+                status = str(row.get("match_status") or "")
+                if status == "完全符合":
+                    summary["exact_match_count"] += 1
+                elif status == "年份不一致":
+                    summary["year_mismatch_count"] += 1
+                elif status == "较为相似":
+                    summary["similar_count"] += 1
+                elif status == "不存在":
+                    summary["not_found_count"] += 1
+            summary["standard_count"] = len(unique_standards)
+        except Exception as exc:
+            print(f"[POC] 汇总任务结果异常: {exc}")
+        return summary
 
     def _save_table_images(self, task_id: str, tables: list[Dict[str, Any]]) -> None:
         if not tables:
@@ -543,55 +684,92 @@ class PocService:
                 "uploaded_at": "上传时间"
             }
         """
-        if not pdf_bytes:
-            raise ValueError("上传文件内容为空")
-        
-        # 验证文件类型
-        if not filename.lower().endswith(".pdf"):
-            raise ValueError("仅支持PDF文件")
-        
-        # 生成任务ID: 优先使用任务名,其次使用文件名前缀 + 时间戳
+        return self.upload_pdfs(
+            pdf_items=[{"filename": filename, "content": pdf_bytes}],
+            task_name=task_name,
+        )
+
+    def upload_pdfs(self, pdf_items: list[Dict[str, Any]], task_name: str = None) -> Dict[str, Any]:
+        """接收一个任务下的多个PDF文件，保存到任务目录并记录数据库。"""
+        if not pdf_items:
+            raise ValueError("请至少上传一个PDF文件")
+
+        normalized_items: list[Dict[str, Any]] = []
+        for item in pdf_items:
+            filename = str(item.get("filename") or "upload.pdf")
+            content = item.get("content") or b""
+            if not content:
+                raise ValueError(f"上传文件内容为空: {filename}")
+            if not filename.lower().endswith(".pdf"):
+                raise ValueError(f"仅支持PDF文件: {filename}")
+            normalized_items.append({"filename": filename, "content": content})
+
+        # 生成任务ID: 优先使用任务名,否则仅使用时间戳。多文件任务不再绑定某个文件名。
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         if task_name and task_name.strip():
             # 使用任务名 + 时间戳
             task_id = f"{task_name.strip()}_{timestamp}"
             print(f"[POC] 使用任务名生成task_id: {task_id}")
         else:
-            # 使用文件名前缀 + 时间戳
-            file_stem = Path(filename).stem.strip() or "upload"
-            task_id = f"{file_stem}_{timestamp}"
-            print(f"[POC] 使用文件名生成task_id: {task_id}")
+            task_id = timestamp
+            print(f"[POC] 使用时间戳生成task_id: {task_id}")
         
         # 确保uploads目录存在
         upload_dir = self.table_layout_service.base_dir / "uploads"
         upload_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 保存PDF文件
-        save_filename = f"{task_id}.pdf"
-        save_path = upload_dir / save_filename
-        save_path.write_bytes(pdf_bytes)
-        
-        file_size = len(pdf_bytes)
+
+        task_upload_dir = upload_dir / task_id
+        task_upload_dir.mkdir(parents=True, exist_ok=True)
+
+        files: list[Dict[str, Any]] = []
+        for index, item in enumerate(normalized_items, start=1):
+            original_filename = item["filename"]
+            safe_filename = self._safe_upload_filename(original_filename)
+            save_filename = f"{index:03d}_{safe_filename}"
+            save_path = task_upload_dir / save_filename
+            save_path.write_bytes(item["content"])
+            files.append(
+                {
+                    "index": index,
+                    "original_filename": original_filename,
+                    "saved_filename": save_filename,
+                    "file_path": str(save_path),
+                    "file_size": len(item["content"]),
+                }
+            )
+
+        manifest_path = task_upload_dir / "files_manifest.json"
+        manifest_path.write_text(
+            json.dumps({"task_id": task_id, "files": files}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        file_names = [item["original_filename"] for item in files]
+        original_filename_summary = self._summarize_filenames(file_names)
+        file_size = sum(int(item.get("file_size") or 0) for item in files)
         uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # 记录到数据库(pdf_task表)
         db_record_id = self._save_to_database(
             task_id=task_id,
-            original_filename=filename,
-            file_path=str(save_path),
+            original_filename=original_filename_summary,
+            file_path=str(task_upload_dir),
             file_size=file_size,
             uploaded_at=uploaded_at
         )
         
-        print(f"[POC] PDF上传成功: {save_path} ({file_size} bytes), DB记录ID: {db_record_id}")
+        print(f"[POC] PDF上传成功: {len(files)} 个文件, dir={task_upload_dir}, DB记录ID: {db_record_id}")
         
         return {
             "task_id": task_id,
-            "filename": save_filename,
-            "original_filename": filename,
-            "file_path": str(save_path),
+            "filename": files[0]["saved_filename"] if len(files) == 1 else task_upload_dir.name,
+            "original_filename": original_filename_summary,
+            "file_path": str(task_upload_dir),
             "file_size": file_size,
             "uploaded_at": uploaded_at,
+            "pdf_count": len(files),
+            "file_names": file_names,
+            "files": files,
         }
 
     def _save_to_database(
@@ -1065,6 +1243,7 @@ class PocService:
             detected_standards_map = self._get_detected_standards_by_table(task_id)
 
             tables: list[Dict[str, Any]] = []
+            task = self.get_task_status(task_id)
             for row in rows:
                 image_path = str(row.get("image_path") or "")
                 markdown_path = str(row.get("markdown_path") or "")
@@ -1086,6 +1265,7 @@ class PocService:
                 )
                 tables.append(
                     {
+                        "pdf_name": self._pdf_name_from_resource_path(task_id, image_path, task),
                         "page": int(row.get("page_number") or 0),
                         "table_index": table_index,
                         "display_name": self._table_display_name_from_path(image_path, table_index),
@@ -1128,6 +1308,7 @@ class PocService:
                 rows = db.get_list(sql, (task_id,)) or []
 
             standards: list[Dict[str, Any]] = []
+            task = self.get_task_status(task_id)
             for row in rows:
                 score = int(row.get("match_score") or 0)
                 confidence = max(0.0, min(1.0, score / 100.0))
@@ -1135,6 +1316,7 @@ class PocService:
                 source_table = self._table_display_name_from_path(row.get("image_path") or "", table_index) if table_index > 0 else ""
                 standards.append(
                     {
+                        "pdf_name": self._pdf_name_from_resource_path(task_id, row.get("image_path") or "", task),
                         "standard_no": row.get("original_text") or "",
                         "matched_standard": row.get("matched_standard_no") or "未匹配",
                         "status": row.get("match_status") or "待识别",
@@ -1158,24 +1340,36 @@ class PocService:
         tables = self._load_task_tables(task_id)
         standards = self._load_task_standards(task_id)
         overall_standard_compare = self._build_overall_standard_compare(task_id)
-        original_filename = task.get("original_filename") or ""
+        file_records = self._get_task_file_records(task)
+        file_names = [
+            str(item.get("original_filename") or item.get("saved_filename") or "")
+            for item in file_records
+            if item.get("original_filename") or item.get("saved_filename")
+        ]
+        original_filename = task.get("original_filename") or self._summarize_filenames(file_names)
+        pdfs = []
+        for record in file_records:
+            pdf_name = str(record.get("original_filename") or record.get("saved_filename") or "")
+            pdf_tables = [table for table in tables if table.get("pdf_name") == pdf_name]
+            pdf_standards = [standard for standard in standards if standard.get("pdf_name") == pdf_name]
+            pdfs.append(
+                {
+                    "pdf_name": pdf_name,
+                    "status": "识别成功" if task.get("status") == 2 else "处理中",
+                    "table_count": len(pdf_tables),
+                    "standard_count": len(pdf_standards),
+                }
+            )
 
         raw_snapshot = dict(task)
         task.update(
             {
                 "task_name": original_filename or task_id,
                 "description": "",
-                "file_names": [original_filename] if original_filename else [],
-                "pdfs": [
-                    {
-                        "pdf_name": original_filename,
-                        "status": "识别成功" if task.get("status") == 2 else "处理中",
-                        "table_count": task.get("table_count", 0),
-                        "standard_count": task.get("standard_count", 0),
-                    }
-                ]
-                if original_filename
-                else [],
+                "file_names": file_names or ([original_filename] if original_filename else []),
+                "pdfs": pdfs,
+                "pdf_count": len(file_records) or (1 if original_filename else 0),
+                "processed_count": len(file_records) if task.get("status") == 2 else 0,
                 "tables": tables,
                 "standards": standards,
                 "annotated_images": self._load_annotated_images(task_id),
@@ -1200,8 +1394,8 @@ class PocService:
         if not task_info:
             raise ValueError(f"任务不存在: {task_id}")
         
-        file_path = task_info.get('file_path')
-        if not file_path:
+        file_records = self._get_task_file_records(task_info)
+        if not file_records:
             raise ValueError(f"任务文件路径为空: {task_id}")
         
         # 2. 更新任务状态为"解析中"
@@ -1215,48 +1409,70 @@ class PocService:
         )
         
         try:
-            # 3. 调用table_layout_service解析PDF
-            print(f"[POC] 开始解析PDF: {file_path}")
-            result = self.table_layout_service.export_annotated_from_pdf_path(
-                pdf_path=file_path,
-                task_id=task_id,
-                render_zoom=None,  # 使用默认值
-                max_pages=None,    # 使用默认值
-            )
-            
-            # 4. 提取表格图片信息并转换为URL
             tables = []
             total_tables = 0
-                    
-            for page in result.get('pages', []):
-                page_idx = page.get('page', 0)
-                table_crop_items = page.get('table_crop_items') or [
-                    {"image_path": table_path}
-                    for table_path in page.get('table_crop_paths', [])
-                ]
-                total_tables += len(table_crop_items)
-                        
-                for table_crop in table_crop_items:
-                    table_path = str(table_crop.get("image_path") or "")
-                    if not table_path:
-                        continue
-                    table_index = len(tables) + 1
-                    # 将本地路径转换为URL路径
-                    url_path = self._local_path_to_url(table_path)
-                    print(f"[POC] 表格图片路径转换: {table_path} -> {url_path}")
-                    tables.append({
-                        "page": page_idx,
-                        "table_index": table_index,
-                        "display_name": table_crop.get("display_label")
-                        or self._table_display_name_from_path(table_path, table_index),
-                        "source_table_index": table_crop.get("original_table_index"),
-                        "split_part": table_crop.get("split_part"),
-                        "split_total": table_crop.get("split_total", 1),
-                        "image_path": table_path,  # 本地路径
-                        "image_url": url_path,     # 可访问的URL
-                        "label": "table",
-                        "score": 0.0,
-                    })
+            total_pages = 0
+            file_count = len(file_records)
+
+            for file_index, file_record in enumerate(file_records, start=1):
+                file_path = file_record.get("file_path")
+                pdf_name = file_record.get("original_filename") or file_record.get("saved_filename") or Path(str(file_path)).name
+                if not file_path:
+                    continue
+
+                layout_task_id = task_id if file_count == 1 else f"{task_id}/pdf_{file_index:03d}"
+                print(f"[POC] 开始解析PDF {file_index}/{file_count}: {file_path}")
+                self._update_task_status(
+                    task_id=task_id,
+                    status=1,
+                    progress=10.00 + (file_index - 1) / max(file_count, 1) * 45.00,
+                    current_step=f"识别中，当前已识别 {file_index - 1}/{file_count} 个文件",
+                )
+
+                result = self.table_layout_service.export_annotated_from_pdf_path(
+                    pdf_path=file_path,
+                    task_id=layout_task_id,
+                    render_zoom=None,
+                    max_pages=None,
+                )
+                total_pages += int(result.get('total_pages') or 0)
+
+                for page in result.get('pages', []):
+                    page_idx = page.get('page', 0)
+                    table_crop_items = page.get('table_crop_items') or [
+                        {"image_path": table_path}
+                        for table_path in page.get('table_crop_paths', [])
+                    ]
+                    total_tables += len(table_crop_items)
+
+                    for table_crop in table_crop_items:
+                        table_path = str(table_crop.get("image_path") or "")
+                        if not table_path:
+                            continue
+                        table_index = len(tables) + 1
+                        url_path = self._local_path_to_url(table_path)
+                        print(f"[POC] 表格图片路径转换: {table_path} -> {url_path}")
+                        tables.append({
+                            "pdf_name": pdf_name,
+                            "page": page_idx,
+                            "table_index": table_index,
+                            "display_name": table_crop.get("display_label")
+                            or self._table_display_name_from_path(table_path, table_index),
+                            "source_table_index": table_crop.get("original_table_index"),
+                            "split_part": table_crop.get("split_part"),
+                            "split_total": table_crop.get("split_total", 1),
+                            "image_path": table_path,
+                            "image_url": url_path,
+                            "label": "table",
+                            "score": 0.0,
+                        })
+
+            self._update_task_status(
+                task_id=task_id,
+                status=1,
+                progress=55.00,
+                current_step=f"识别中，当前已识别 {file_count}/{file_count} 个文件",
+            )
 
             # 重跑识别时，先清理旧结果再写入本次表格图片
             self._clear_table_and_downstream_data(task_id)
@@ -1267,8 +1483,8 @@ class PocService:
                 task_id=task_id,
                 status=1,  # 1-解析中(等待Markdown阶段)
                 progress=60.00,
-                current_step="解析中",
-                page_count=result.get('total_pages', 0),
+                current_step="解析完成",
+                page_count=total_pages,
                 table_count=total_tables,
             )
             
@@ -1276,12 +1492,12 @@ class PocService:
             
             return {
                 "task_id": task_id,
-                "total_pages": result.get('total_pages', 0),
+                "total_pages": total_pages,
                 "total_tables": total_tables,
+                "file_count": len(file_records),
+                "processed_files": len(file_records),
                 "tables": tables,
                 "annotated_images": self._load_annotated_images(task_id),
-                "page_images_dir": result.get('page_images_dir', ''),
-                "debug_dir": result.get('debug_dir', ''),
             }
             
         except Exception as exc:
@@ -1294,7 +1510,173 @@ class PocService:
             print(f"[POC] PDF解析失败: {exc}")
             raise
 
-    def convert_tables_to_markdown(self, task_id: str, tables: list | None) -> Dict[str, Any]:
+    def process_single_pdf_full(self, task_id: str, file_index: int) -> Dict[str, Any]:
+        """按PDF粒度执行完整流程：识别表格 -> Markdown -> 标准检测，并保留已完成PDF结果。"""
+        task_info = self.get_task_status(task_id)
+        if not task_info:
+            raise ValueError(f"任务不存在: {task_id}")
+
+        file_records = self._get_task_file_records(task_info)
+        file_count = len(file_records)
+        if file_count <= 0:
+            raise ValueError(f"任务文件路径为空: {task_id}")
+        if file_index < 1 or file_index > file_count:
+            raise ValueError(f"PDF序号超出范围: {file_index}/{file_count}")
+
+        if file_index == 1:
+            self._clear_table_and_downstream_data(task_id)
+            self._update_task_status(
+                task_id=task_id,
+                status=1,
+                progress=0.00,
+                current_step=f"标准检测中，当前已完成 0/{file_count} 份PDF的标准检测",
+                started_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                clear_completed_at=True,
+                table_count=0,
+                standard_count=0,
+                exact_match_count=0,
+                year_mismatch_count=0,
+                similar_count=0,
+                not_found_count=0,
+            )
+
+        file_record = file_records[file_index - 1]
+        file_path = file_record.get("file_path")
+        pdf_name = file_record.get("original_filename") or file_record.get("saved_filename") or Path(str(file_path)).name
+        if not file_path:
+            raise ValueError(f"PDF文件路径为空: {pdf_name}")
+
+        try:
+            existing_tables = self._load_task_tables_from_db(task_id)
+            table_start_index = len(existing_tables) + 1
+            layout_task_id = task_id if file_count == 1 else f"{task_id}/pdf_{file_index:03d}"
+
+            self._update_task_status(
+                task_id=task_id,
+                status=1,
+                progress=max(1.0, (file_index - 1) / max(file_count, 1) * 100.0),
+                current_step=f"识别中，当前已完成 {file_index - 1}/{file_count} 份PDF的标准检测，正在处理: {pdf_name}",
+            )
+
+            print(f"[POC] 开始完整处理PDF {file_index}/{file_count}: {file_path}")
+            result = self.table_layout_service.export_annotated_from_pdf_path(
+                pdf_path=file_path,
+                task_id=layout_task_id,
+                render_zoom=None,
+                max_pages=None,
+            )
+
+            tables: list[Dict[str, Any]] = []
+            for page in result.get('pages', []):
+                page_idx = page.get('page', 0)
+                table_crop_items = page.get('table_crop_items') or [
+                    {"image_path": table_path}
+                    for table_path in page.get('table_crop_paths', [])
+                ]
+                for table_crop in table_crop_items:
+                    table_path = str(table_crop.get("image_path") or "")
+                    if not table_path:
+                        continue
+                    table_index = table_start_index + len(tables)
+                    tables.append({
+                        "pdf_name": pdf_name,
+                        "page": page_idx,
+                        "table_index": table_index,
+                        "display_name": table_crop.get("display_label")
+                        or self._table_display_name_from_path(table_path, table_index),
+                        "source_table_index": table_crop.get("original_table_index"),
+                        "split_part": table_crop.get("split_part"),
+                        "split_total": table_crop.get("split_total", 1),
+                        "image_path": table_path,
+                        "image_url": self._local_path_to_url(table_path),
+                        "label": "table",
+                        "score": 0.0,
+                    })
+
+            if not tables:
+                raise ValueError(f"未识别到表格: {pdf_name}")
+
+            self._save_table_images(task_id, tables)
+
+            markdown_result = self.convert_tables_to_markdown(
+                task_id=task_id,
+                tables=tables,
+                clear_standard_data=False,
+                update_task_status=False,
+            )
+            markdown_files = [
+                str(item.get("md_file") or "")
+                for item in markdown_result.get("results", [])
+                if item.get("success") and item.get("md_file")
+            ]
+            if not markdown_files:
+                raise ValueError(f"未生成Markdown文件: {pdf_name}")
+
+            detection_result = self.detect_standards(
+                task_id=task_id,
+                markdown_files=markdown_files,
+                clear_existing=False,
+                update_task_status=False,
+            )
+
+            self._refresh_highlighted_markdown_storage(task_id)
+            summary = self._get_task_result_summary_from_db(task_id)
+            completed_count = file_index
+            is_completed = completed_count >= file_count
+            self._update_task_status(
+                task_id=task_id,
+                status=2 if is_completed else 1,
+                progress=100.00 if is_completed else completed_count / max(file_count, 1) * 100.00,
+                current_step="标准检测完成" if is_completed else f"标准检测中，当前已完成 {completed_count}/{file_count} 份PDF的标准检测",
+                page_count=int(task_info.get("page_count") or 0) + int(result.get('total_pages') or 0),
+                table_count=summary["table_count"],
+                standard_count=summary["standard_count"],
+                exact_match_count=summary["exact_match_count"],
+                year_mismatch_count=summary["year_mismatch_count"],
+                similar_count=summary["similar_count"],
+                not_found_count=summary["not_found_count"],
+                completed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S") if is_completed else None,
+            )
+
+            return {
+                "task_id": task_id,
+                "pdf_name": pdf_name,
+                "file_index": file_index,
+                "file_count": file_count,
+                "processed_files": completed_count,
+                "total_pages": int(result.get('total_pages') or 0),
+                "total_tables": len(tables),
+                "tables": tables,
+                "markdown_results": markdown_result.get("results", []),
+                "markdown_files": markdown_files,
+                "detection_result": detection_result,
+                "summary": summary,
+            }
+        except Exception as exc:
+            summary = self._get_task_result_summary_from_db(task_id)
+            completed_count = max(0, file_index - 1)
+            self._update_task_status(
+                task_id=task_id,
+                status=3,
+                progress=completed_count / max(file_count, 1) * 100.00,
+                current_step=f"{pdf_name}处理失败，已完成 {completed_count}/{file_count} 份PDF的标准检测: {str(exc)}",
+                table_count=summary["table_count"],
+                standard_count=summary["standard_count"],
+                exact_match_count=summary["exact_match_count"],
+                year_mismatch_count=summary["year_mismatch_count"],
+                similar_count=summary["similar_count"],
+                not_found_count=summary["not_found_count"],
+            )
+            print(f"[POC] PDF完整处理失败: task_id={task_id}, file_index={file_index}, error={exc}")
+            raise
+
+    def convert_tables_to_markdown(
+        self,
+        task_id: str,
+        tables: list | None,
+        clear_standard_data: bool = True,
+        update_task_status: bool = True,
+    ) -> Dict[str, Any]:
         """
         将表格图片转换为Markdown
         
@@ -1314,6 +1696,10 @@ class PocService:
         markdown_dir = self.table_layout_service.base_dir / "markdown" / task_id
         markdown_dir.mkdir(parents=True, exist_ok=True)
         
+        task_info = self.get_task_status(task_id)
+        file_records = self._get_task_file_records(task_info)
+        file_count = len(file_records) or 1
+
         print(f"[POC] 开始转换表格为Markdown,共 {len(tables)} 个表格")
         
         results = []
@@ -1334,14 +1720,17 @@ class PocService:
                 print(f"[POC] 转换表格 {idx+1}/{len(tables)}: {Path(image_path).name}")
                 
                 # 基于原始图片文件名生成markdown文件名，保持编号一致
-                image_stem = Path(image_path).stem  # e.g. page_003_table_003_part_1
-                table_suffix_match = re.search(r"table_\d+(?:_part_\d+|_safe50_(?:upper|lower))?", image_stem)
-                if table_suffix_match:
-                    table_task_id = f"{task_id}_{table_suffix_match.group(0)}"
-                else:
-                    table_task_id = f"{task_id}_table_{original_table_index:03d}"
-                    if split_part:
-                        table_task_id = f"{table_task_id}_part_{split_part}"
+                table_task_id = f"{task_id}_table_{int(original_table_index):03d}"
+                if split_part:
+                    table_task_id = f"{table_task_id}_part_{split_part}"
+
+                if update_task_status:
+                    self._update_task_status(
+                        task_id=task_id,
+                        status=1,
+                        progress=60.00 + idx / max(len(tables), 1) * 18.00,
+                        current_step=f"转换中，当前已转换 {idx}/{len(tables)} 个表格",
+                    )
                 
                 result = image_to_markdown(
                     image_path=Path(image_path),
@@ -1427,25 +1816,29 @@ class PocService:
         print(f"[POC] Markdown转换完成: 成功 {success_count}/{len(tables)}")
 
         self._save_markdown_results(task_id, results)
-        self._clear_standard_data(task_id)
+        if clear_standard_data:
+            self._clear_standard_data(task_id)
 
-        self._update_task_status(
-            task_id=task_id,
-            status=2,
-            progress=80.00,
-            current_step="解析完成，等待检验",
-            standard_count=0,
-            exact_match_count=0,
-            year_mismatch_count=0,
-            similar_count=0,
-            not_found_count=0,
-        )
+        if update_task_status:
+            self._update_task_status(
+                task_id=task_id,
+                status=2,
+                progress=80.00,
+                current_step="解析完成，等待检验",
+                standard_count=0,
+                exact_match_count=0,
+                year_mismatch_count=0,
+                similar_count=0,
+                not_found_count=0,
+            )
         
         return {
             "task_id": task_id,
             "total_tables": len(tables),
             "success_count": success_count,
             "fail_count": len(tables) - success_count,
+            "file_count": file_count,
+            "processed_files": file_count,
             "markdown_dir": str(markdown_dir),
             "results": results,
         }
@@ -1567,7 +1960,13 @@ class PocService:
         except Exception as exc:
             print(f"[POC] 更新任务状态异常: {exc}")
 
-    def detect_standards(self, task_id: str, markdown_files: list | None) -> Dict[str, Any]:
+    def detect_standards(
+        self,
+        task_id: str,
+        markdown_files: list | None,
+        clear_existing: bool = True,
+        update_task_status: bool = True,
+    ) -> Dict[str, Any]:
         """
         检测Markdown文件中的标准号并与标准库比对
         
@@ -1584,20 +1983,24 @@ class PocService:
             raise ValueError("Markdown文件列表为空")
         
         print(f"[POC] 开始标准检测: task_id={task_id}, {len(markdown_files)} 个文件")
+        task_info = self.get_task_status(task_id)
+        file_count = len(self._get_task_file_records(task_info)) or 1
         
         # 更新任务状态为"标准检测中"
-        self._update_task_status(
-            task_id=task_id,
-            status=1,  # 1-解析中
-            progress=90.00,
-            current_step="检验中",
-            clear_completed_at=True,
-        )
+        if update_task_status:
+            self._update_task_status(
+                task_id=task_id,
+                status=1,  # 1-解析中
+                progress=90.00,
+                current_step="检验中",
+                clear_completed_at=True,
+            )
         
         try:
             # 创建标准比对器
             comparator = StandardCodeComparator()
-            self._clear_standard_data(task_id)
+            if clear_existing:
+                self._clear_standard_data(task_id)
             markdown_id_map = self._get_table_markdown_id_map(task_id)
             
             all_results = []
@@ -1611,6 +2014,13 @@ class PocService:
             
             # 遍历每个Markdown文件
             for idx, md_file_path in enumerate(markdown_files):
+                if update_task_status:
+                    self._update_task_status(
+                        task_id=task_id,
+                        status=1,
+                        progress=90.00 + idx / max(len(markdown_files), 1) * 8.00,
+                        current_step=f"检验中，当前已检测 {idx}/{len(markdown_files)} 个Markdown文件",
+                    )
                 md_path = Path(md_file_path)
                 if not md_path.exists():
                     print(f"[POC] Markdown文件不存在: {md_file_path}")
@@ -1759,18 +2169,19 @@ class PocService:
             
             # 更新数据库统计信息
             unique_standard_count = len(unique_standards)
-            self._update_task_status(
-                task_id=task_id,
-                status=2,  # 2-已完成
-                progress=100.00,
-                current_step="标准检测完成",
-                standard_count=unique_standard_count,
-                exact_match_count=exact_match_count,
-                year_mismatch_count=year_mismatch_count,
-                similar_count=similar_count,
-                not_found_count=not_found_count,
-                completed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            )
+            if update_task_status:
+                self._update_task_status(
+                    task_id=task_id,
+                    status=2,  # 2-已完成
+                    progress=100.00,
+                    current_step="标准检测完成",
+                    standard_count=unique_standard_count,
+                    exact_match_count=exact_match_count,
+                    year_mismatch_count=year_mismatch_count,
+                    similar_count=similar_count,
+                    not_found_count=not_found_count,
+                    completed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                )
             
             print(f"[POC] 标准检测完成: 总计 {total_standards} 个标准号")
 
@@ -1782,6 +2193,8 @@ class PocService:
                 "task_id": task_id,
                 "total_standards": total_standards,
                 "unique_standard_count": unique_standard_count,
+                "file_count": file_count,
+                "processed_files": file_count,
                 "exact_match_count": exact_match_count,
                 "year_mismatch_count": year_mismatch_count,
                 "similar_count": similar_count,
@@ -1792,11 +2205,12 @@ class PocService:
             
         except Exception as exc:
             # 检测失败,更新状态
-            self._update_task_status(
-                task_id=task_id,
-                status=3,  # 3-失败
-                current_step=f"标准检测失败: {str(exc)}"
-            )
+            if update_task_status:
+                self._update_task_status(
+                    task_id=task_id,
+                    status=3,  # 3-失败
+                    current_step=f"标准检测失败: {str(exc)}"
+                )
             print(f"[POC] 标准检测失败: {exc}")
             raise
 

@@ -38,13 +38,30 @@ TMP_DIR = Path(__file__).resolve().parents[2] / "tmp"
 
 
 @router.post("/drawing/upload-pdf", response_model=Result)
-async def upload_pdf(file: UploadFile = File(...), task_name: str = None):
-    """接收前端上传的PDF文件,保存到服务器并返回上传成功信息"""
+async def upload_pdf(
+    files: Optional[List[UploadFile]] = File(None),
+    file: Optional[UploadFile] = File(None),
+    task_name: str = None,
+):
+    """接收前端上传的一个或多个PDF文件,保存到服务器并返回上传成功信息"""
     try:
-        pdf_bytes = await file.read()
-        data = poc_service.upload_pdf(
-            pdf_bytes=pdf_bytes,
-            filename=file.filename or "upload.pdf",
+        upload_files = list(files or [])
+        if file is not None:
+            upload_files.append(file)
+        if not upload_files:
+            raise ValueError("请至少上传一个PDF文件")
+
+        pdf_items = []
+        for upload_file in upload_files:
+            pdf_items.append(
+                {
+                    "filename": upload_file.filename or "upload.pdf",
+                    "content": await upload_file.read(),
+                }
+            )
+
+        data = poc_service.upload_pdfs(
+            pdf_items=pdf_items,
             task_name=task_name,
         )
         return Result.ok(data=data, msg="PDF上传成功")
@@ -178,6 +195,18 @@ async def process_pdf_tables(task_id: str):
     try:
         data = poc_service.process_pdf_tables(task_id=task_id)
         return Result.ok(data=data, msg="PDF解析完成")
+    except ValueError as exc:
+        return Result.fail(msg=str(exc), code=400)
+    except Exception as exc:
+        return Result.fail(msg=str(exc), code=500)
+
+
+@router.post("/drawing/process-single-pdf-full", response_model=Result)
+async def process_single_pdf_full(task_id: str, file_index: int):
+    """按PDF序号执行完整流程，并保留同任务内已完成PDF的结果"""
+    try:
+        data = poc_service.process_single_pdf_full(task_id=task_id, file_index=file_index)
+        return Result.ok(data=data, msg="单个PDF检测完成")
     except ValueError as exc:
         return Result.fail(msg=str(exc), code=400)
     except Exception as exc:
