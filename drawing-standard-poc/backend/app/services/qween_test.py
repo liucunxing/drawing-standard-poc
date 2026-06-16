@@ -1,8 +1,15 @@
+# =====================================================================
+# [上线禁用] 本文件整体禁用！生产环境不允许调用外部大模型API。
+# 该文件仅供开发环境测试使用，已在 mineru_img2md.py 中注释了对本文件的 import。
+# 如需恢复，请同时取消 mineru_img2md.py 中的 import 注释。
+# =====================================================================
+
 import os
 from openai import OpenAI
 
 # ========== 配置 ==========
-API_KEY = "sk-ecf13e58b337433f85411de8ab3313fa"
+# [安全警告] API密钥禁止提交到代码仓库，生产环境请使用环境变量
+API_KEY = ""
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL = "qwen-plus"  # 如果效果不满意，可以换成 "qwen-max"
 
@@ -68,8 +75,11 @@ def fix_nozzle_table_md(md_content: str) -> str:
 
 # ========== 以下为独立运行入口（直接执行脚本时使用）==========
 if __name__ == '__main__':
-    INPUT_FILE = r"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\tmp\markdown\0601测试1_20260601110851\patched_0601测试1_20260601110851_table_2.md"
-    OUTPUT_FILE = r"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\tmp\table_2_fixed.md"
+    # [上线待替换] 硬编码 Windows 测试路径，生产环境请勿执行
+    # INPUT_FILE = r"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\tmp\markdown\..."
+    # OUTPUT_FILE = r"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\tmp\table_2_fixed.md"
+    INPUT_FILE = "./test_input.md"
+    OUTPUT_FILE = "./test_output.md"
 
     with open(INPUT_FILE, 'r', encoding='utf-8') as f:
         md_content = f.read()

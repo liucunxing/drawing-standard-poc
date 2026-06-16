@@ -27,7 +27,8 @@ from pathlib import Path
 from PIL import Image
 import shutil
 
-from backend.app.services.qween_test import fix_nozzle_table_md
+# [上线禁用] Qwen 大模型后处理 - 生产环境不允许调用外部大模型
+# from backend.app.services.qween_test import fix_nozzle_table_md
 
 os.environ['MINERU_MODEL_SOURCE'] = 'local'
 os.environ['MINERU_TABLE_MODEL'] = 'struct_eqtable'
@@ -408,24 +409,30 @@ def image_to_markdown(
         )
 
         # 步骤8: 管口表 Qwen 后处理
-        # 条件: 包含"管口表"，或同时包含"法兰标准"和"公称压力"(兼容空格/HTML标签分隔)
+        # ================================================================
+        # [上线禁用] 以下 Qwen 大模型调用已在生产环境禁用
+        # 原因: 生产环境不允许调用外部大模型API
+        # 如需恢复，取消下方注释并恢复 import fix_nozzle_table_md
+        # ================================================================
         qwen_fixed_md_content = None
         qwen_fixed_applied = False
         qwen_fixed_md_target = None
 
-        if _should_apply_qwen_nozzle_fix(patched_md_content):
-            print(f"[img2md] 检测到管口表特征, 调用 Qwen 后处理修复列错位...")
-            qwen_fixed_md_content = fix_nozzle_table_md(patched_md_content)
-            qwen_fixed_applied = qwen_fixed_md_content != patched_md_content
-
-            if qwen_fixed_applied:
-                qwen_fixed_md_target = output_dir / f"qwen_fixed_{task_id}.md"
-                qwen_fixed_md_target.write_text(qwen_fixed_md_content, encoding="utf-8")
-                print(f"[img2md] Qwen 修复完成, 已保存: {qwen_fixed_md_target}")
-            else:
-                print(f"[img2md] Qwen 返回内容与原始一致, 未生成修复文件")
-        else:
-            print(f"[img2md] 未命中管口表触发条件, 跳过 Qwen 后处理")
+        # [上线禁用] Qwen 管口表修复逻辑 - 已注释
+        # if _should_apply_qwen_nozzle_fix(patched_md_content):
+        #     print(f"[img2md] 检测到管口表特征, 调用 Qwen 后处理修复列错位...")
+        #     qwen_fixed_md_content = fix_nozzle_table_md(patched_md_content)
+        #     qwen_fixed_applied = qwen_fixed_md_content != patched_md_content
+        #
+        #     if qwen_fixed_applied:
+        #         qwen_fixed_md_target = output_dir / f"qwen_fixed_{task_id}.md"
+        #         qwen_fixed_md_target.write_text(qwen_fixed_md_content, encoding="utf-8")
+        #         print(f"[img2md] Qwen 修复完成, 已保存: {qwen_fixed_md_target}")
+        #     else:
+        #         print(f"[img2md] Qwen 返回内容与原始一致, 未生成修复文件")
+        # else:
+        #     print(f"[img2md] 未命中管口表触发条件, 跳过 Qwen 后处理")
+        print(f"[img2md] Qwen 管口表后处理已禁用(生产环境限制)")
 
         return {
             'md_file': str(raw_md_target),
@@ -467,16 +474,13 @@ def process_task(task_id, table_blocks_dir=None, output_base_dir=None, dpi=300, 
     返回:
         list: 包含所有处理结果的列表
     """
-    # 默认路径配置
+    # 默认路径配置（从数据库加载，替代硬编码）
+    from backend.config.app_config import app_config
     if table_blocks_dir is None:
-        table_blocks_dir = Path(
-            rf"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\tmp\table_blocks\{task_id}"
-        )
+        table_blocks_dir = app_config.tmp_dir / "table_blocks" / task_id
 
     if output_base_dir is None:
-        output_base_dir = Path(
-            rf"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\tmp\{task_id}"
-        )
+        output_base_dir = app_config.tmp_dir / task_id
 
     # 确保源目录存在
     if not table_blocks_dir.exists():
@@ -576,6 +580,7 @@ def main():
         results = process_task('task001')
     """
     # 任务 ID(实际使用时会从变量传入)
+    from backend.config.app_config import app_config
     TASK_ID = "task001"
 
     print("=" * 80)
@@ -595,7 +600,7 @@ def main():
         print(f"处理完成!")
         print(f"成功: {success_count} 个")
         print(f"失败: {fail_count} 个")
-        print(f"输出目录: D:\work\Develop\drawing-poc\drawing-standard-poc\backend\tmp\{TASK_ID}")
+        print(f"输出目录: {app_config.tmp_dir / TASK_ID}")
         print(f"{'=' * 80}")
 
     except Exception as e:

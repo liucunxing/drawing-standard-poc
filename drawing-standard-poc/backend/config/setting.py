@@ -7,11 +7,11 @@ import dotenv
 
 
 DEFAULTS = {
-    "MYSQL_HOST": "localhost",
-    "MYSQL_PORT": "3306",
+    "MYSQL_HOST": "10.150.18.21",
+    "MYSQL_PORT": "31002",
     "MYSQL_DB": "drawing-poc",
     "MYSQL_USER": "root",
-    "MYSQL_PASSWORD": "root",
+    "MYSQL_PASSWORD": "smartvision",
 }
 
 

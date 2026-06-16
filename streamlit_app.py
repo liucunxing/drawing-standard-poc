@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from datetime import datetime
 import getpass
@@ -26,8 +27,10 @@ REVIEW_STATUSES = {"待复核", "异常", "失败"}
 FAILED_STATUSES = {"异常", "失败"}
 
 # 后端API配置
-BACKEND_BASE_URL = "http://localhost:8000"  # FastAPI后端地址
-BACKEND_TMP_DIR = Path(__file__).resolve().parent / "drawing-standard-poc" / "backend" / "tmp"
+# [上线待替换] 生产环境请修改为实际服务器地址，或通过环境变量 BACKEND_BASE_URL 配置
+BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://localhost:8000")  # FastAPI后端地址
+# [上线待替换] 生产环境请通过环境变量 BACKEND_TMP_DIR 配置，或从数据库读取
+BACKEND_TMP_DIR = Path(os.environ.get("BACKEND_TMP_DIR", str(Path(__file__).resolve().parent / "drawing-standard-poc" / "backend" / "tmp")))
 STANDARD_LIBRARY_OPERATOR = "ADMIN"
 
 

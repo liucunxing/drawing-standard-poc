@@ -10,8 +10,9 @@ from backend.app.services.standard_data_service import standard_data_service
 
 router = APIRouter()
 
-# 配置tmp目录路径 (用于访问图片)
-TMP_DIR = Path(__file__).resolve().parents[2] / "tmp"
+# 从数据库加载 tmp 目录配置（替代硬编码）
+from backend.config.app_config import app_config
+TMP_DIR = app_config.tmp_dir
 
 
 # @router.get("/users", response_model=Result)

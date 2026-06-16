@@ -54,14 +54,15 @@ class TableLayoutService4Batch:
     """Batch tester copied from service4 with multi-parameter experiment support."""
 
     def __init__(self) -> None:
-        self.base_dir = Path(__file__).resolve().parents[2] / "tmp"
+        # 从数据库加载路径配置（替代硬编码）
+        from backend.config.app_config import app_config
+        self.base_dir = app_config.tmp_dir
         self.page_images_dir = self.base_dir / "page_images"
         self.table_blocks_dir = self.base_dir / "table_blocks"
         self.page_images_dir.mkdir(parents=True, exist_ok=True)
         self.table_blocks_dir.mkdir(parents=True, exist_ok=True)
 
-        default_models_root = Path(r"D:\work\Develop\conda_envs\.paddlex\official_models")
-        self.local_models_root = Path(os.getenv("PADDLEOCR_LOCAL_MODELS_ROOT", str(default_models_root)))
+        self.local_models_root = Path(os.getenv("PADDLEOCR_LOCAL_MODELS_ROOT", str(app_config.paddle_models_root)))
         self.layout_model_name = os.getenv("PADDLEOCR_LAYOUT_MODEL_NAME", "PP-DocLayout_plus-L")
         self.layout_model_dir = self._resolve_layout_model_dir()
 
@@ -696,9 +697,16 @@ class TableLayoutService4Batch:
 
     def _annotation_font(self) -> ImageFont.ImageFont:
         font_candidates = [
+            # Linux 中文字体路径（生产环境优先）
+            Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+            Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+            # Linux 英文字体
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+            # Windows 开发环境字体（仅开发时使用）
             Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "msyh.ttc",
             Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "simhei.ttf",
-            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
         ]
         for font_path in font_candidates:
             try:
@@ -1170,7 +1178,9 @@ class TableLayoutService4Batch:
 
 
 if __name__ == "__main__":
-    local_pdf = Path(r"D:\work\Develop\drawing-poc\drawing-standard-poc\backend\1810-V-303-03.371-1-A1-Rev.0.pdf")
+    # [上线待替换] 以下测试入口仅在开发环境使用，生产环境请勿执行
+    # 原 Windows 测试路径: D:\work\Develop\drawing-poc\drawing-standard-poc\backend\1810-V-303-03.371-1-A1-Rev.0.pdf
+    local_pdf = Path("./test_input.pdf")  # 请在运行时指定实际PDF路径
 
     service = TableLayoutService4Batch()
 
