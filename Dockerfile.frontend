@@ -1,0 +1,53 @@
+# ============================================================
+# drawing-poc 前端 Dockerfile（Streamlit）
+# 无需 GPU，使用轻量 Python 基础镜像
+# ============================================================
+FROM python:3.10-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# ---------- 系统依赖 ----------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 \
+    curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---------- 工作目录 ----------
+WORKDIR /app
+
+# ---------- Python 虚拟环境 ----------
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# ---------- pip 配置 ----------
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    && pip install --upgrade pip
+
+# ---------- 前端依赖（仅需 streamlit + requests） ----------
+RUN pip install --no-cache-dir \
+    streamlit==1.57.0 \
+    requests==2.34.2 \
+    python-dotenv==1.2.2 \
+    pillow==12.2.0 \
+    numpy==2.2.6 \
+    pandas==2.3.3 \
+    altair==6.1.0 \
+    pydeck==0.9.2 \
+    watchdog==6.0.0
+
+# ---------- 复制前端代码 ----------
+COPY streamlit_app.py /app/streamlit_app.py
+
+# ---------- Streamlit 配置（避免 root 权限问题） ----------
+RUN mkdir -p /root/.streamlit && \
+    echo '[server]\nheadless = true\nport = 8501\naddress = "0.0.0.0"\nenableCORS = false' \
+    > /root/.streamlit/config.toml
+
+# ---------- 环境变量 ----------
+# 生产环境通过 docker-compose 注入，这里仅设默认值
+ENV BACKEND_BASE_URL=http://backend:8000 \
+    BACKEND_TMP_DIR=/app/tmp
+
+# ---------- 启动 ----------
+CMD ["streamlit", "run", "/app/streamlit_app.py"]

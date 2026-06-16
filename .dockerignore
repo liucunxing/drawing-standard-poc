@@ -1,0 +1,18 @@
+# 不打包进 Docker 镜像的文件
+.history/
+__pycache__/
+*.pyc
+*.pyo
+.idea/
+.vscode/
+.git/
+.gitignore
+*.md
+mockups/
+docs/
+data/
+logs/
+models/
+*.pdf
+.env
+.env.example

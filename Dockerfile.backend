@@ -1,0 +1,68 @@
+# ============================================================
+# drawing-poc 后端 Dockerfile（FastAPI + MinerU + PaddleOCR）
+# 需要 GPU 支持，使用 nvidia/cuda 基础镜像
+# ============================================================
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# ---------- 系统依赖 ----------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.10 python3.10-dev python3.10-venv python3-pip \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+    libgomp1 libgfortran5 \
+    poppler-utils \
+    fonts-wqy-zenhei fonts-wqy-microhei \
+    curl git && \
+    ln -sf /usr/bin/python3.10 /usr/bin/python && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---------- 工作目录 ----------
+WORKDIR /app
+
+# ---------- Python 虚拟环境 ----------
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# ---------- pip 配置（清华源加速） ----------
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    && pip install --upgrade pip setuptools wheel
+
+# ---------- GPU 深度学习框架（必须先行安装，避免被后续包降级） ----------
+# PyTorch CUDA 12.4
+RUN pip install torch==2.6.0+cu124 torchaudio==2.6.0+cu124 torchvision==0.21.0+cu124 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+# PaddlePaddle GPU（CUDA 12）
+RUN pip install paddlepaddle-gpu==3.2.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu123/
+
+# ---------- 应用依赖 ----------
+COPY requirements-linux.txt .
+RUN pip install --no-cache-dir -r requirements-linux.txt
+
+# ---------- 复制项目代码 ----------
+# 整个 drawing-poc 项目复制进来，保持目录结构
+COPY . /app/project
+
+# 设置工作目录到项目后端
+WORKDIR /app/project/drawing-standard-poc/backend
+
+# ---------- 目录准备 ----------
+RUN mkdir -p /app/logs /app/data /app/models/paddle \
+    && mkdir -p tmp
+
+# ---------- 环境变量 ----------
+ENV UVICORN_RELOAD=false \
+    UVICORN_PORT=8000 \
+    PADDLE_MODELS_ROOT=/app/models/paddle \
+    BACKEND_TMP_DIR=/app/project/drawing-standard-poc/backend/tmp \
+    LOG_DIR=/app/logs
+
+# ---------- 启动命令 ----------
+CMD ["python", "-m", "uvicorn", "app.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--log-level", "info", \
+     "--access-log"]

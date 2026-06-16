@@ -1,0 +1,89 @@
+# ============================================================
+# drawing-poc Docker Compose 编排文件
+# 服务器：10.150.18.21
+# 项目目录：/home/application/image/sinopec
+# ============================================================
+# 使用方式：
+#   cd /home/application/image/sinopec
+#   cp .env.example .env        # 复制并修改配置
+#   docker-compose up -d --build
+#   docker-compose logs -f
+# ============================================================
+
+version: "3.9"
+
+services:
+  # ──────────────────────────────────────────
+  # 后端：FastAPI + MinerU + PaddleOCR（需 GPU）
+  # ──────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: drawing-poc-backend
+    restart: unless-stopped
+    runtime: nvidia              # 需要 NVIDIA Container Toolkit
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - UVICORN_RELOAD=false
+      - UVICORN_PORT=8000
+      - LOG_DIR=/app/logs
+    volumes:
+      # 日志持久化（宿主机:容器）
+      - ./logs/backend:/app/logs
+      # 临时文件目录（上传的 PDF、生成的图片等）
+      - ./data/tmp:/app/project/drawing-standard-poc/backend/tmp
+      # PaddlePaddle 模型缓存（避免每次重启重新下载）
+      - ./models/paddle:/app/models/paddle
+      # MinerU 模型缓存
+      - ./models/mineru:/root/.cache/mineru
+      # HuggingFace 模型缓存
+      - ./models/huggingface:/root/.cache/huggingface
+    networks:
+      - drawing-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s       # GPU 模型加载需要时间
+
+  # ──────────────────────────────────────────
+  # 前端：Streamlit（无需 GPU）
+  # ──────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: drawing-poc-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8501}:8501"
+    env_file:
+      - .env
+    environment:
+      # 浏览器访问后端用的地址（必须是浏览器能访问的 IP）
+      - BACKEND_BASE_URL=http://${SERVER_IP:-10.150.18.21}:${BACKEND_PORT:-8000}
+      # streamlit 容器内部调用后端也用同一地址（通过宿主机 IP 转发）
+      - BACKEND_TMP_DIR=/app/tmp
+    volumes:
+      - ./logs/frontend:/app/logs
+      - ./data/tmp:/app/tmp
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - drawing-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  drawing-net:
+    driver: bridge
