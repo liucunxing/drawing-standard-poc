@@ -6,7 +6,7 @@
 
 set -e
 
-PROJECT_DIR="/home/application/image/sinopec"
+PROJECT_DIR="/home/application"
 echo "========================================"
 echo " drawing-poc 部署脚本"
 echo " 项目目录: $PROJECT_DIR"
