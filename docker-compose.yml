@@ -1,10 +1,10 @@
 # ============================================================
 # drawing-poc Docker Compose 编排文件
 # 服务器：10.150.18.21
-# 项目目录：/home/application/image/sinopec
+# 项目目录：/home/application/drawing-standard-poc-master
 # ============================================================
 # 使用方式：
-#   cd /home/application/image/sinopec
+#   cd /home/application/drawing-standard-poc-master
 #   cp .env.example .env        # 复制并修改配置
 #   docker-compose up -d --build
 #   docker-compose logs -f
@@ -36,11 +36,11 @@ services:
       - ./logs/backend:/app/logs
       # 临时文件目录（上传的 PDF、生成的图片等）
       - ./data/tmp:/app/project/drawing-standard-poc/backend/tmp
-      # PaddlePaddle 模型缓存（避免每次重启重新下载）
-      - ./models/paddle:/app/models/paddle
+      # PaddleOCR 模型缓存（PP-DocLayout等，首次运行时自动下载到这里）
+      - ./models/paddlex:/root/.paddlex
       # MinerU 模型缓存
       - ./models/mineru:/root/.cache/mineru
-      # HuggingFace 模型缓存
+      # HuggingFace 模型缓存（struct_eqtable等）
       - ./models/huggingface:/root/.cache/huggingface
     networks:
       - drawing-net

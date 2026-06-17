@@ -6,7 +6,7 @@
 
 set -e
 
-PROJECT_DIR="/home/application"
+PROJECT_DIR="/home/application/drawing-standard-poc-master"
 echo "========================================"
 echo " drawing-poc 部署脚本"
 echo " 项目目录: $PROJECT_DIR"
@@ -25,7 +25,7 @@ echo "[2/7] 创建目录结构..."
 mkdir -p "$PROJECT_DIR/logs/backend"
 mkdir -p "$PROJECT_DIR/logs/frontend"
 mkdir -p "$PROJECT_DIR/data/tmp"
-mkdir -p "$PROJECT_DIR/models/paddle"
+mkdir -p "$PROJECT_DIR/models/paddlex"
 mkdir -p "$PROJECT_DIR/models/mineru"
 mkdir -p "$PROJECT_DIR/models/huggingface"
 echo "  ✅ 目录创建完成"
