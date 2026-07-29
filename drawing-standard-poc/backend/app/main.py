@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import router
+from .api.routes import router
 
 
 # ─────────────────────────────────────────────
@@ -53,14 +53,20 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# 跨域
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# 默认使用 Nginx 同源访问。仅在显式配置 CORS_ORIGINS 时开放跨域。
+cors_origins = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials="*" not in cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # 注册路由
 app.include_router(router, prefix="/api")
@@ -76,4 +82,4 @@ async def on_startup():
 
 @app.get("/")
 def root():
-    return {"message": "服务运行中"}    
+    return {"message": "服务运行中"}

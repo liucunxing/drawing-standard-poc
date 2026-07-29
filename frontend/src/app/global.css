@@ -1,0 +1,56 @@
+:root {
+  font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+  color: #1f2937;
+  background: #f4f6f8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+
+html,
+body,
+#root {
+  min-width: 1180px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body { min-height: 100vh; }
+a { color: inherit; }
+
+.page-container {
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.page-title {
+  margin: 0;
+  color: #172033;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 32px;
+}
+
+.page-description {
+  margin: 4px 0 0;
+  color: #667085;
+  line-height: 22px;
+}
+
+.muted-text { color: #667085; }
+
+.route-loading {
+  padding: 48px;
+  color: #667085;
+  text-align: center;
+}

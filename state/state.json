@@ -1,0 +1,25 @@
+{
+  "project": "drawing-standard-mvp",
+  "phase": "React MVP implementation",
+  "state": "CLOSE",
+  "status": "LOCAL_CANDIDATE_COMPLETE_TRIAL_BLOCKED",
+  "frozen_contracts": [
+    "docs/project_input.md",
+    "docs/api_contract.md",
+    "docs/product_ux_brief.md"
+  ],
+  "protected_paths": [
+    "data/",
+    "streamlit_app.py",
+    "database_schema.sql",
+    "drawing-standard-poc/backend/app/services/"
+  ],
+  "active_tasks": [],
+  "open_findings": [
+    "P1 external: real FastAPI/MySQL/GPU/customer-PDF trial not available",
+    "P2 external: Docker image build blocked by Docker Hub EOF"
+  ],
+  "repair_round": 1,
+  "last_gate": "FINAL_REVIEW_LOCAL_PASS_TRIAL_BLOCKED",
+  "next_allowed_action": "Provide a reachable FastAPI/MySQL/GPU environment and representative PDFs, then run trial acceptance"
+}

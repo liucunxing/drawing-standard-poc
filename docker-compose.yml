@@ -1,7 +1,6 @@
 # ============================================================
-# drawing-poc Docker Compose 编排文件
-# 服务器：10.150.18.21
-# 项目目录：/home/application/drawing-standard-poc-master
+# drawing-standard-mvp Docker Compose 编排文件
+# 部署地址与凭据全部通过 .env 提供
 # ============================================================
 # 使用方式：
 #   cd /home/application/drawing-standard-poc-master
@@ -9,8 +8,6 @@
 #   docker-compose up -d --build
 #   docker-compose logs -f
 # ============================================================
-
-version: "3.9"
 
 services:
   # ──────────────────────────────────────────
@@ -52,25 +49,47 @@ services:
       start_period: 120s       # GPU 模型加载需要时间
 
   # ──────────────────────────────────────────
-  # 前端：Streamlit（无需 GPU）
+  # 前端：React 静态站点 + Nginx（默认试用入口）
   # ──────────────────────────────────────────
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.frontend
+      dockerfile: Dockerfile.web
+      args:
+        VITE_APP_BASE: ${VITE_APP_BASE:-/}
     container_name: drawing-poc-frontend
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-8501}:8501"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - drawing-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8501/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Streamlit 回退入口：仅在显式启用 legacy profile 时运行。
+  frontend-legacy:
+    profiles: ["legacy"]
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: drawing-poc-frontend-legacy
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_LEGACY_PORT:-8502}:8501"
     env_file:
       - .env
     environment:
-      # 浏览器访问后端用的地址（必须是浏览器能访问的 IP）
-      - BACKEND_BASE_URL=http://${SERVER_IP:-10.150.18.21}:${BACKEND_PORT:-8000}
-      # streamlit 容器内部调用后端也用同一地址（通过宿主机 IP 转发）
+      - BACKEND_BASE_URL=http://backend:8000
       - BACKEND_TMP_DIR=/app/tmp
     volumes:
-      - ./logs/frontend:/app/logs
+      - ./logs/frontend-legacy:/app/logs
       - ./data/tmp:/app/tmp
     depends_on:
       backend:

@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 from typing import List, Optional
 from backend.app.core.response import Result
+from backend.app.core.paths import resolve_child_path
 from backend.app.models.schemas import UserCreate, StandardDataCreate, StandardDataUpdate
 from backend.app.services.user_service import user_service
 from backend.app.services.poc_service import poc_service
@@ -277,7 +278,10 @@ async def serve_file(filepath: str):
     Returns:
         文件响应
     """
-    file_path = TMP_DIR / filepath
+    try:
+        file_path = resolve_child_path(TMP_DIR, filepath)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"文件不存在: {filepath}")

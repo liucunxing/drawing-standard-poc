@@ -1,0 +1,9 @@
+.content { display: grid; gap: 20px; }
+.panel { background: #fff; border: 1px solid #e3e8ef; border-radius: 4px; padding: 20px; }
+.hint { margin: 0 0 16px; color: #667085; line-height: 22px; }
+.fileList { margin-top: 16px; }
+.fileName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.progress { margin-top: 18px; }
+.progressText { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 8px; color: #475467; }
+.error { margin-top: 16px; }

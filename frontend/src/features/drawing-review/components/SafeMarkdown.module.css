@@ -1,0 +1,21 @@
+.content {
+  color: #344054;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.content :global(p) { margin: 0 0 12px; }
+.content :global(pre) {
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: 4px;
+}
+.content :global(code) { font-family: Consolas, "Courier New", monospace; }
+.content :global(table) { width: 100%; border-collapse: collapse; }
+.content :global(th),
+.content :global(td) { padding: 8px 10px; border: 1px solid #d0d5dd; text-align: left; }
+.content :global(th) { background: #f2f4f7; font-weight: 600; }
+.content :global(mark) { padding: 1px 3px; color: #613400; background: #ffe58f; }

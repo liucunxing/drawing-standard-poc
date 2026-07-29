@@ -1,0 +1,52 @@
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.metricCard :global(.ant-card-body) {
+  padding: 18px 20px;
+}
+
+.neutral { color: inherit; }
+
+.metricLabel,
+.metricValue {
+  display: block;
+}
+
+.metricLabel {
+  color: #667085;
+  font-size: 14px;
+}
+
+.metricValue {
+  margin-top: 8px;
+  color: #172033;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 36px;
+}
+
+.blue .metricValue { color: #1677ff; }
+.green .metricValue { color: #389e0d; }
+.red .metricValue { color: #d92d20; }
+
+.taskCard :global(.ant-card-head) {
+  min-height: 52px;
+}
+
+.taskCard :global(.ant-card-head-title) {
+  color: #172033;
+  font-weight: 600;
+}
+
+.taskLink {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}

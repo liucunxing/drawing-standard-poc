@@ -1,0 +1,4 @@
+.filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.tableCard { background: #fff; border: 1px solid #e3e8ef; border-radius: 4px; padding: 16px 16px 0; }
+.taskName { color: #175cd3; cursor: pointer; font-weight: 500; }
+.subtle { margin-top: 3px; color: #667085; font-size: 12px; }

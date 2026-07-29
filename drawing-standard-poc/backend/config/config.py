@@ -42,11 +42,11 @@ class SQLManager(object):
     # 连接数据库
     def connect(self):
         self.conn = pymysql.connect(
-            host=DEFAULTS["MYSQL_HOST"],
-            port=int(DEFAULTS["MYSQL_PORT"]),
-            user=DEFAULTS["MYSQL_USER"],
-            passwd=DEFAULTS["MYSQL_PASSWORD"],
-            db=DEFAULTS["MYSQL_DB"],
+            host=get_env("MYSQL_HOST"),
+            port=int(get_env("MYSQL_PORT")),
+            user=get_env("MYSQL_USER"),
+            passwd=get_env("MYSQL_PASSWORD"),
+            db=get_env("MYSQL_DB"),
             charset="utf8mb4"
         )
         self.cursor = self.conn.cursor(cursor=cursors.DictCursor)

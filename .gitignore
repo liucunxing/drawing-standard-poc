@@ -1,0 +1,13 @@
+.env
+logs/
+models/
+data/tmp/
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.playwright-cli/
+output/playwright/
+__pycache__/
+*.pyc

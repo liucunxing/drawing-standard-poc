@@ -46,8 +46,8 @@ RUN pip install --no-cache-dir -r requirements-linux.txt
 # 整个 drawing-poc 项目复制进来，保持目录结构
 COPY . /app/project
 
-# 设置工作目录到项目后端
-WORKDIR /app/project/drawing-standard-poc/backend
+# 从项目包根目录启动，确保 backend.* 导入路径一致
+WORKDIR /app/project/drawing-standard-poc
 
 # ---------- 目录准备 ----------
 RUN mkdir -p /app/logs /app/data /app/models/paddle \
@@ -61,7 +61,7 @@ ENV UVICORN_RELOAD=false \
     LOG_DIR=/app/logs
 
 # ---------- 启动命令 ----------
-CMD ["python", "-m", "uvicorn", "app.main:app", \
+CMD ["python", "-m", "uvicorn", "backend.app.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
      "--log-level", "info", \
