@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listTasks } from '../api/drawingApi'
 import { DashboardPage } from './DashboardPage'
 
@@ -23,6 +23,8 @@ beforeAll(() => {
 })
 
 describe('DashboardPage', () => {
+  beforeEach(() => vi.clearAllMocks())
+
   it('loads the latest 100 tasks and derives recent status metrics', async () => {
     vi.mocked(listTasks).mockResolvedValue([
       task({ task_id: 'task-1', task_name: '处理中的任务', status: 1 }),
@@ -39,6 +41,19 @@ describe('DashboardPage', () => {
     expect(metrics.getByText('处理中').parentElement).toHaveTextContent('1')
     expect(metrics.getByText('已完成').parentElement).toHaveTextContent('1')
     expect(metrics.getByText('异常').parentElement).toHaveTextContent('1')
+  })
+
+  it('keeps the dashboard framework visible when the backend is unavailable', async () => {
+    vi.mocked(listTasks).mockRejectedValue(new Error('后端连接失败'))
+
+    render(<DashboardPage />, { wrapper: MemoryRouter })
+
+    expect(await screen.findByText('数据加载失败')).toBeInTheDocument()
+    expect(screen.getByText('后端连接失败')).toBeInTheDocument()
+    expect(screen.getByLabelText('近期任务统计')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '任务名称' })).toBeInTheDocument()
+    expect(screen.getByText('近期任务数据暂不可用')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /重新加载/ })).toBeInTheDocument()
   })
 })
 

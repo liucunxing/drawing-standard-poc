@@ -1,5 +1,5 @@
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Empty, Skeleton, Table, Typography } from 'antd'
+import { Button, Card, Empty, Table, Typography, notification } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -27,6 +27,7 @@ function metricsFor(tasks: TaskSummary[]): DashboardMetrics {
 
 export function DashboardPage() {
   const navigate = useNavigate()
+  const [notificationApi, notificationContext] = notification.useNotification()
   const [tasks, setTasks] = useState<TaskSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -38,11 +39,18 @@ export function DashboardPage() {
       setTasks(await listTasks(100))
     } catch (reason) {
       setTasks([])
-      setError(reason instanceof Error ? reason.message : '近期任务加载失败，请稍后重试。')
+      const errorMessage = reason instanceof Error ? reason.message : '近期任务加载失败，请稍后重试。'
+      setError(errorMessage)
+      notificationApi.error({
+        key: 'dashboard-data-load-error',
+        message: '数据加载失败',
+        description: errorMessage,
+        placement: 'topRight',
+      })
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [notificationApi])
 
   useEffect(() => {
     void loadTasks()
@@ -80,6 +88,7 @@ export function DashboardPage() {
 
   return (
     <main className="page-container">
+      {notificationContext}
       <div className="page-header">
         <div>
           <h1 className="page-title">工作台</h1>
@@ -88,40 +97,33 @@ export function DashboardPage() {
         <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/tasks/new')}>新建审查</Button>
       </div>
 
-      {loading ? (
-        <Skeleton active paragraph={{ rows: 7 }} />
-      ) : error ? (
-        <Alert
-          type="error"
-          showIcon
-          message="近期任务加载失败"
-          description={error}
-          action={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadTasks()}>重试</Button>}
+      <section className={styles.metrics} aria-label="近期任务统计">
+        <MetricCard label="近期任务" value={metrics.recent} />
+        <MetricCard label="处理中" value={metrics.processing} tone="blue" />
+        <MetricCard label="已完成" value={metrics.completed} tone="green" />
+        <MetricCard label="异常" value={metrics.failed} tone="red" />
+      </section>
+      <Card className={styles.taskCard} title="最近任务" variant="outlined">
+        <Table<TaskSummary>
+          rowKey={(task) => task.task_id}
+          columns={columns}
+          dataSource={tasks.slice(0, 8)}
+          pagination={false}
+          loading={loading}
+          size="middle"
+          scroll={{ x: 760 }}
+          locale={{
+            emptyText: (
+              <Empty
+                description={error ? '近期任务数据暂不可用' : '暂无近期任务'}
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+              >
+                {error && <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadTasks()}>重新加载</Button>}
+              </Empty>
+            ),
+          }}
         />
-      ) : (
-        <>
-          <section className={styles.metrics} aria-label="近期任务统计">
-            <MetricCard label="近期任务" value={metrics.recent} />
-            <MetricCard label="处理中" value={metrics.processing} tone="blue" />
-            <MetricCard label="已完成" value={metrics.completed} tone="green" />
-            <MetricCard label="异常" value={metrics.failed} tone="red" />
-          </section>
-          <Card className={styles.taskCard} title="最近任务" variant="outlined">
-            {tasks.length === 0 ? (
-              <Empty description="暂无近期任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            ) : (
-              <Table<TaskSummary>
-                rowKey={(task) => task.task_id}
-                columns={columns}
-                dataSource={tasks.slice(0, 8)}
-                pagination={false}
-                size="middle"
-                scroll={{ x: 760 }}
-              />
-            )}
-          </Card>
-        </>
-      )}
+      </Card>
     </main>
   )
 }

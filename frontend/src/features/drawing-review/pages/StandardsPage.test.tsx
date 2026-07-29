@@ -54,9 +54,11 @@ describe('StandardsPage', () => {
   it('shows a retryable business or HTTP error', async () => {
     standardApi.listStandards.mockRejectedValueOnce(new Error('网络不可用'))
     renderPage()
-    expect(await screen.findByText('标准库加载失败')).toBeInTheDocument()
+    expect(await screen.findByText('数据加载失败')).toBeInTheDocument()
     expect(screen.getByText('网络不可用')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }))
+    expect(screen.getByRole('columnheader', { name: '标准编号' })).toBeInTheDocument()
+    expect(screen.getByText('标准库数据暂不可用')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /重新加载/ }))
     await waitFor(() => expect(standardApi.listStandards).toHaveBeenCalledTimes(2))
   })
 })

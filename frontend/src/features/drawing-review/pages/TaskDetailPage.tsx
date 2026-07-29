@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Descriptions, Empty, Image, List, Progress, Radio, Select, Space, Spin, Tabs, Tag } from 'antd'
+import { Alert, Button, Card, Descriptions, Empty, Image, List, Progress, Radio, Select, Space, Spin, Tabs, Tag, notification } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { getTaskDetail } from '../api/drawingApi'
@@ -95,25 +95,35 @@ function StandardsReview({ standards }: { standards: StandardMatch[] }) {
 
 export function TaskDetailPage() {
   const { taskId = '' } = useParams()
+  const [notificationApi, notificationContext] = notification.useNotification()
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const load = useCallback(async () => {
     if (!taskId) { setError('任务编号缺失'); setLoading(false); return }
     setLoading(true); setError('')
-    try { setDetail(await getTaskDetail(taskId)) } catch (reason) { setError(reason instanceof Error ? reason.message : '任务详情加载失败') } finally { setLoading(false) }
-  }, [taskId])
+    try { setDetail(await getTaskDetail(taskId)) } catch (reason) {
+      setDetail(null)
+      const errorMessage = reason instanceof Error ? reason.message : '任务详情加载失败'
+      setError(errorMessage)
+      notificationApi.error({ key: 'task-detail-data-load-error', message: '数据加载失败', description: errorMessage, placement: 'topRight' })
+    } finally { setLoading(false) }
+  }, [notificationApi, taskId])
   useEffect(() => { void load() }, [load])
-  if (loading) return <main className="page-container"><div className={styles.state}><Spin /><div className="muted-text">正在加载任务详情…</div></div></main>
-  if (error) return <main className="page-container"><Alert type="error" showIcon message="任务详情加载失败" description={error} action={<Button size="small" onClick={() => void load()}>重试</Button>} /></main>
-  if (!detail) return <main className="page-container"><Empty description="未找到任务详情" /></main>
+  const tabItems = detail ? [
+    { key: 'overview', label: '任务概览', children: <Overview detail={detail} /> },
+    { key: 'layout', label: '版面识别', children: <LayoutRecognition detail={detail} /> },
+    { key: 'content', label: '内容识别', children: <ContentRecognition tables={detail.tables} /> },
+    { key: 'standards', label: '标准审查', children: <StandardsReview standards={detail.standards} /> },
+  ] : [
+    { key: 'overview', label: '任务概览', children: loading ? <div className={styles.state}><Spin /><div className="muted-text">正在加载任务详情…</div></div> : <Empty description={error ? '任务数据暂不可用' : '未找到任务详情'} image={Empty.PRESENTED_IMAGE_SIMPLE}>{error && <Button size="small" onClick={() => void load()}>重新加载</Button>}</Empty> },
+    { key: 'layout', label: '版面识别', children: <Empty description="暂无版面识别数据" image={Empty.PRESENTED_IMAGE_SIMPLE} /> },
+    { key: 'content', label: '内容识别', children: <Empty description="暂无内容识别数据" image={Empty.PRESENTED_IMAGE_SIMPLE} /> },
+    { key: 'standards', label: '标准审查', children: <Empty description="暂无标准审查数据" image={Empty.PRESENTED_IMAGE_SIMPLE} /> },
+  ]
   return <main className="page-container">
-    <div className="page-header"><div><h1 className="page-title">任务详情</h1><p className="page-description">{detail.task_id}</p></div><TaskStatusTag status={detail.status} /></div>
-    <Tabs items={[
-      { key: 'overview', label: '任务概览', children: <Overview detail={detail} /> },
-      { key: 'layout', label: '版面识别', children: <LayoutRecognition detail={detail} /> },
-      { key: 'content', label: '内容识别', children: <ContentRecognition tables={detail.tables} /> },
-      { key: 'standards', label: '标准审查', children: <StandardsReview standards={detail.standards} /> },
-    ]} />
+    {notificationContext}
+    <div className="page-header"><div><h1 className="page-title">任务详情</h1><p className="page-description">{detail?.task_id || taskId || '—'}</p></div>{detail && <TaskStatusTag status={detail.status} />}</div>
+    <Tabs items={tabItems} />
   </main>
 }
