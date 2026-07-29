@@ -15,6 +15,24 @@ pnpm dev
 
 开发服务器默认将 `/api` 代理到 `http://localhost:8000`。如后端地址不同，可在 `frontend/.env.local` 设置 `VITE_API_PROXY_TARGET`；该文件不得提交。
 
+## Mock 分支本地演示
+
+`feature/react-mvp-mock` 在工程版之上提供一个内存型演示后端，仅用于本地检查 React 交互。它不会连接 MySQL、不会执行 OCR，也不能替代真实后端联调证据。
+
+在项目根目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\start_local_demo.ps1
+```
+
+默认访问地址为 `http://127.0.0.1:15173/`，演示 API 为 `http://127.0.0.1:18000/docs`。如果端口冲突，可传入 `-FrontendPort` 和 `-BackendPort`。
+
+测试结束后执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\stop_local_demo.ps1
+```
+
 ## 默认试用运行（React + Nginx）
 
 1. 复制 `.env.example` 为 `.env`，并仅在部署环境中填写数据库连接信息。
