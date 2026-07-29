@@ -1,4 +1,5 @@
-import { Alert, Button, DatePicker, Empty, Input, Pagination, Select, Spin, Table } from 'antd'
+import { ReloadOutlined } from '@ant-design/icons'
+import { Button, DatePicker, Empty, Input, Pagination, Select, Table, notification } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -14,6 +15,7 @@ type StatusFilter = 'all' | '0' | '1' | '2' | '3' | 'unknown'
 
 export function TaskCenterPage() {
   const navigate = useNavigate()
+  const [notificationApi, notificationContext] = notification.useNotification()
   const [tasks, setTasks] = useState<TaskSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -26,9 +28,14 @@ export function TaskCenterPage() {
     setLoading(true)
     setError(null)
     try { setTasks(await listTasks(100)) }
-    catch (requestError) { setError(requestError instanceof Error ? requestError.message : '任务列表加载失败') }
+    catch (requestError) {
+      setTasks([])
+      const errorMessage = requestError instanceof Error ? requestError.message : '任务列表加载失败'
+      setError(errorMessage)
+      notificationApi.error({ key: 'task-center-data-load-error', message: '数据加载失败', description: errorMessage, placement: 'topRight' })
+    }
     finally { setLoading(false) }
-  }, [])
+  }, [notificationApi])
   useEffect(() => { void loadTasks() }, [loadTasks])
   const filtered = useMemo(() => tasks.filter((task) => {
     const text = `${task.task_name} ${task.original_filename} ${task.file_names.join(' ')}`.toLowerCase()
@@ -50,8 +57,18 @@ export function TaskCenterPage() {
     { title: '操作', width: 90, fixed: 'right', render: (_, task) => <Button type="link" onClick={() => navigate(`/tasks/${encodeURIComponent(task.task_id)}`)}>查看详情</Button> },
   ]
   const current = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  return <main className="page-container"><div className="page-header"><div><h1 className="page-title">任务中心</h1><p className="page-description">展示最近 100 条任务，可按名称、状态和创建日期筛选。</p></div></div><section className={styles.tableCard}>
+  return <main className="page-container">{notificationContext}<div className="page-header"><div><h1 className="page-title">任务中心</h1><p className="page-description">展示最近 100 条任务，可按名称、状态和创建日期筛选。</p></div></div><section className={styles.tableCard}>
     <div className={styles.filters}><Input allowClear placeholder="搜索任务或文件名称" value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 240 }} /><Select value={status} onChange={setStatus} style={{ width: 130 }} options={[{ value: 'all', label: '全部状态' }, { value: '0', label: '待处理' }, { value: '1', label: '处理中' }, { value: '2', label: '已完成' }, { value: '3', label: '异常' }, { value: 'unknown', label: '未知状态' }]} /><DatePicker.RangePicker value={dateRange} onChange={setDateRange} /></div>
-    {error ? <Alert type="error" showIcon message="任务列表加载失败" description={error} action={<Button size="small" onClick={() => void loadTasks()}>重试</Button>} /> : loading ? <div style={{ padding: 48, textAlign: 'center' }}><Spin /><div className="muted-text">正在加载任务…</div></div> : filtered.length ? <><Table rowKey={(task) => task.task_id} columns={columns} dataSource={current} pagination={false} size="middle" /><Pagination current={page} pageSize={PAGE_SIZE} total={filtered.length} showSizeChanger={false} onChange={setPage} style={{ margin: '16px 0', textAlign: 'right' }} /></> : <Empty description={tasks.length ? '没有符合筛选条件的任务' : '暂无任务'} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+    <Table
+      rowKey={(task) => task.task_id}
+      columns={columns}
+      dataSource={current}
+      pagination={false}
+      loading={loading}
+      size="middle"
+      scroll={{ x: 1040 }}
+      locale={{ emptyText: <Empty description={error ? '任务数据暂不可用' : tasks.length ? '没有符合筛选条件的任务' : '暂无任务'} image={Empty.PRESENTED_IMAGE_SIMPLE}>{error && <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadTasks()}>重新加载</Button>}</Empty> }}
+    />
+    {filtered.length > 0 && <Pagination current={page} pageSize={PAGE_SIZE} total={filtered.length} showSizeChanger={false} onChange={setPage} style={{ margin: '16px 0', textAlign: 'right' }} />}
   </section></main>
 }

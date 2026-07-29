@@ -1,5 +1,5 @@
-import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
-import { Alert, Button, Empty, Form, Input, Modal, Pagination, Space, Spin, Table, Typography, message } from 'antd'
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { Button, Empty, Form, Input, Modal, Pagination, Space, Table, Typography, message, notification } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { createStandard, deleteStandard, listStandards, updateStandard } from '../api/standardApi'
@@ -15,6 +15,7 @@ function displayValue(value: string | null | undefined): string {
 
 export function StandardsPage() {
   const [form] = Form.useForm<StandardInput>()
+  const [notificationApi, notificationContext] = notification.useNotification()
   const [keyword, setKeyword] = useState('')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
@@ -36,11 +37,13 @@ export function StandardsPage() {
     } catch (requestError) {
       setRecords([])
       setTotal(0)
-      setError(getErrorMessage(requestError, '标准库加载失败，请稍后重试'))
+      const errorMessage = getErrorMessage(requestError, '标准库加载失败，请稍后重试')
+      setError(errorMessage)
+      notificationApi.error({ key: 'standards-data-load-error', message: '数据加载失败', description: errorMessage, placement: 'topRight' })
     } finally {
       setLoading(false)
     }
-  }, [page, query])
+  }, [notificationApi, page, query])
 
   useEffect(() => {
     void loadStandards()
@@ -122,10 +125,9 @@ export function StandardsPage() {
     },
   ]
 
-  const hasNoRecords = !loading && !error && records.length === 0
-
   return (
     <main className="page-container">
+      {notificationContext}
       <div className={styles.header}>
         <div>
           <Typography.Title level={2} className="page-title">标准库</Typography.Title>
@@ -147,16 +149,18 @@ export function StandardsPage() {
           />
         </div>
 
-        {error && <Alert className={styles.alert} type="error" showIcon message="标准库加载失败" description={error} action={<Button size="small" onClick={() => void loadStandards()}>重试</Button>} />}
-        {loading ? <div className={styles.state}><Spin /><div className="muted-text">正在加载标准库…</div></div> : hasNoRecords ? <div className={styles.state}><Empty description={query ? '未找到匹配的标准' : '暂无标准记录'} /></div> : !error && (
-          <>
-            <Table<StandardRecord> rowKey="id" columns={columns} dataSource={records} pagination={false} />
-            <div className={styles.pagination}>
-              <Typography.Text type="secondary">共 {total} 条</Typography.Text>
-              <Pagination current={page} pageSize={PAGE_SIZE} total={total} showSizeChanger={false} showLessItems onChange={setPage} />
-            </div>
-          </>
-        )}
+        <Table<StandardRecord>
+          rowKey="id"
+          columns={columns}
+          dataSource={records}
+          pagination={false}
+          loading={loading}
+          locale={{ emptyText: <Empty description={error ? '标准库数据暂不可用' : query ? '未找到匹配的标准' : '暂无标准记录'} image={Empty.PRESENTED_IMAGE_SIMPLE}>{error && <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadStandards()}>重新加载</Button>}</Empty> }}
+        />
+        <div className={styles.pagination}>
+          <Typography.Text type="secondary">共 {total} 条</Typography.Text>
+          <Pagination current={page} pageSize={PAGE_SIZE} total={total} showSizeChanger={false} showLessItems onChange={setPage} disabled={total === 0} />
+        </div>
       </section>
 
       <Modal
