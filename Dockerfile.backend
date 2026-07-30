@@ -1,0 +1,85 @@
+# ============================================================
+# drawing-poc 后端 Dockerfile（FastAPI + MinerU + PaddleOCR）
+# GPU 版本 - CUDA 12.4，PyTorch/PaddlePaddle GPU（无 GPU 时自动降级 CPU）
+# ============================================================
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# ---------- 系统依赖（阿里云镜像加速，Ubuntu 22.04） ----------
+RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list && \
+    sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    python3.10 python3.10-venv python3.10-dev \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+    libgomp1 libgfortran5 \
+    poppler-utils \
+    fonts-wqy-zenhei fonts-wqy-microhei \
+    curl git && \
+    curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10 && \
+    ln -sf /usr/bin/python3.10 /usr/bin/python && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---------- 工作目录 ----------
+WORKDIR /app
+
+# ---------- pip 配置（清华源加速） ----------
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    && pip install --upgrade pip setuptools wheel
+
+# ---------- GPU 深度学习框架（无 GPU 时自动降级 CPU） ----------
+# PyTorch GPU cu124（官方源 + 清华备用源加速依赖解析）
+RUN pip install --trusted-host download.pytorch.org \
+    --index-url https://download.pytorch.org/whl/cu124 \
+    --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    torch==2.6.0+cu124 torchvision==0.21.0+cu124
+
+# PaddlePaddle GPU cu123（飞桨官方国内源 + 清华备用源）
+RUN pip install paddlepaddle-gpu==3.1.0 \
+    --index-url https://www.paddlepaddle.org.cn/packages/stable/cu123/ \
+    --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# ---------- 应用依赖 ----------
+# Ubuntu 22.04 系统自带 blinker 1.4（distutils 安装），pip 无法覆盖，需强制重装
+RUN pip install --no-cache-dir --ignore-installed blinker
+COPY requirements-linux.txt .
+RUN pip install --no-cache-dir -r requirements-linux.txt
+
+# ---------- 强制升级 transformers（绕过 struct-eqtable 的保守版本约束） ----------
+# struct-eqtable 0.3.3 声明 transformers<=4.45.2，但实际兼容 4.57+
+# MinerU 3.1.15 的 PPDocLayoutV2 模型需要 hgnet_v2 backbone，仅 transformers>=4.57.0 支持
+RUN pip install --no-cache-dir --no-deps 'transformers==4.57.6' 'tokenizers==0.22.2'
+
+# ---------- GPU VLM 必需依赖 accelerate ----------
+# GPU 模式下 transformers 用 device_map 加载 Qwen2VLForConditionalGeneration 需要 accelerate
+# 上面 transformers 用 --no-deps 安装，不会自动带入，这里显式安装（--no-deps 避免改动已锁定的 torch）
+RUN pip install --no-cache-dir --no-deps 'accelerate==1.13.0'
+
+# ---------- 复制项目代码 ----------
+COPY . /app/project
+
+# 设置工作目录到项目根目录（drawing-standard-poc），保持 backend.xxx 导入路径正确
+WORKDIR /app/project/drawing-standard-poc
+
+# ---------- 目录准备 ----------
+RUN mkdir -p /app/logs /app/data /app/models/paddle \
+    && mkdir -p backend/tmp
+
+# ---------- 环境变量 ----------
+ENV UVICORN_RELOAD=false \
+    UVICORN_PORT=8000 \
+    PADDLE_MODELS_ROOT=/app/models/paddle \
+    BACKEND_TMP_DIR=/app/project/drawing-standard-poc/backend/tmp \
+    LOG_DIR=/app/logs
+
+# ---------- 启动命令 ----------
+CMD ["python", "-m", "uvicorn", "backend.app.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--log-level", "info", \
+     "--access-log"]

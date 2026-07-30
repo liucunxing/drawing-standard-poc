@@ -1,0 +1,6 @@
+case_id,file_name,description,expected_tables,expected_standards,owner,remark
+case_001,,清晰 PDF 单图纸样例,,,,
+case_002,,多表格图纸样例,,,,
+case_003,,模糊扫描图纸样例,,,,
+case_004,,包含年份不一致标准样例,,,,
+case_005,,包含不存在标准样例,,,,

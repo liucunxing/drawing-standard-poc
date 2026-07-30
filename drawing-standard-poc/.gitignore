@@ -1,0 +1,25 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+# 编辑器历史记录插件
+.history/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 临时文件和输出目录
+backend/tmp/

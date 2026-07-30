@@ -1,0 +1,1281 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>图纸表格识别 POC</title>
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --panel: #ffffff;
+      --line: #d8e0ea;
+      --text: #1f2937;
+      --muted: #667085;
+      --primary: #1f6feb;
+      --primary-soft: #eaf2ff;
+      --success: #15803d;
+      --success-soft: #eaf7ef;
+      --warning: #b45309;
+      --warning-soft: #fff5e6;
+      --danger: #b42318;
+      --danger-soft: #fff0ee;
+      --code: #111827;
+      --shadow: 0 12px 28px rgba(16, 24, 40, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      font-size: 14px;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--text);
+      padding: 0 14px;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.58;
+    }
+
+    button.primary {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #ffffff;
+    }
+
+    input {
+      width: 100%;
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 10px;
+      background: #ffffff;
+      color: var(--text);
+    }
+
+    .app {
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .shell {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin-top: 6px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #ffffff;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    .status-pill.ready .status-dot {
+      background: var(--success);
+    }
+
+    .status-pill.loading .status-dot {
+      background: var(--primary);
+      animation: pulse 1s infinite ease-in-out;
+    }
+
+    .status-pill.error .status-dot {
+      background: var(--danger);
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(0.85);
+        opacity: 0.55;
+      }
+
+      50% {
+        transform: scale(1.2);
+        opacity: 1;
+      }
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(390px, 0.92fr) minmax(0, 1.38fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .side-stack {
+      display: grid;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      min-height: 52px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .panel-title {
+      font-weight: 700;
+    }
+
+    .panel-body {
+      padding: 16px;
+    }
+
+    .upload-zone {
+      min-height: 156px;
+      border: 1px dashed #98abc7;
+      border-radius: 8px;
+      background: #f8fbff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 18px;
+      cursor: pointer;
+      transition: border-color 0.16s ease, background 0.16s ease;
+    }
+
+    .upload-zone:hover,
+    .upload-zone.dragging {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+    }
+
+    .upload-zone strong {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 16px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .form-row {
+      margin-top: 14px;
+    }
+
+    .form-row label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .file-meta {
+      margin-top: 14px;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      line-height: 1.6;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 12px;
+    }
+
+    .stat .num {
+      font-size: 23px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .stat .label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .summary-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 11px 12px;
+      min-width: 0;
+    }
+
+    .summary-card strong {
+      display: block;
+      font-size: 22px;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .summary-card span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .summary-card.pass strong {
+      color: var(--success);
+    }
+
+    .summary-card.warn strong {
+      color: var(--warning);
+    }
+
+    .summary-card.error strong {
+      color: var(--danger);
+    }
+
+    .summary-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .summary-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 10px 12px;
+    }
+
+    .summary-row strong {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary-row .muted {
+      margin-top: 3px;
+      font-size: 12px;
+    }
+
+    .step-block {
+      margin-top: 18px;
+    }
+
+    .step-block:first-of-type {
+      margin-top: 0;
+    }
+
+    .step-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+      font-weight: 700;
+    }
+
+    .step-note {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 400;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .info-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 10px 12px;
+      min-width: 0;
+    }
+
+    .info-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .info-value {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+
+    .message {
+      display: none;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      line-height: 1.6;
+    }
+
+    .message.show {
+      display: block;
+    }
+
+    .message.info {
+      border: 1px solid #b8cbed;
+      background: var(--primary-soft);
+      color: #24416f;
+    }
+
+    .message.success {
+      border: 1px solid #b9dec5;
+      background: var(--success-soft);
+      color: var(--success);
+    }
+
+    .message.error {
+      border: 1px solid #fac5bf;
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #ffffff;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 11px 10px;
+      text-align: left;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    th {
+      background: #f8fafc;
+      color: #475467;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .empty {
+      padding: 34px 12px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .score {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: var(--success-soft);
+      color: var(--success);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .score.warn {
+      background: var(--warning-soft);
+      color: var(--warning);
+    }
+
+    .result-tag {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .result-tag.pass {
+      background: var(--success-soft);
+      color: var(--success);
+    }
+
+    .result-tag.warn {
+      background: var(--warning-soft);
+      color: var(--warning);
+    }
+
+    .result-tag.error {
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .path {
+      max-width: 320px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      direction: rtl;
+      color: var(--muted);
+    }
+
+    .pdf-name {
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    details {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    summary {
+      padding: 12px 14px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    pre {
+      margin: 0;
+      padding: 14px;
+      border-top: 1px solid var(--line);
+      background: var(--code);
+      color: #d1e0ff;
+      overflow: auto;
+      max-height: 360px;
+      line-height: 1.58;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+    }
+
+    @media (max-width: 920px) {
+      .app {
+        padding: 16px;
+      }
+
+      .topbar,
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        display: grid;
+      }
+
+      .stats {
+        grid-template-columns: 1fr;
+      }
+
+      .info-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="shell">
+      <header class="topbar">
+        <div>
+          <h1>图纸表格识别 POC</h1>
+          <div class="subtitle">上传 PDF 图纸，按图纸识别、表格解析、标准提取比对三个步骤展示任务结果。</div>
+        </div>
+        <div class="status-pill ready" id="statusPill">
+          <span class="status-dot"></span>
+          <span id="statusText">待上传</span>
+        </div>
+      </header>
+
+      <main class="grid">
+        <div class="side-stack">
+          <section class="panel">
+            <div class="panel-header">
+              <div class="panel-title">1. 上传 PDF</div>
+            </div>
+            <div class="panel-body">
+              <div class="upload-zone" id="uploadZone" tabindex="0" role="button" aria-label="选择 PDF 文件">
+                <div>
+                  <strong>点击选择或拖入 PDF</strong>
+                  <div class="muted">选择 PDF 后调用接口；演示数据按多 PDF 任务展示。</div>
+                </div>
+              </div>
+              <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden>
+
+              <div class="form-row">
+                <label for="apiInput">后端接口地址</label>
+                <input id="apiInput" value="http://localhost:8000/api/drawing/extract-table-blocks">
+              </div>
+
+              <div class="actions">
+                <button class="primary" id="uploadBtn" disabled>开始识别</button>
+                <button id="demoBtn">加载演示数据</button>
+                <button id="clearBtn" disabled>清空结果</button>
+              </div>
+
+              <div class="file-meta" id="fileMeta">
+                <span class="muted">尚未选择文件</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div class="panel-title">2. 审查结果清单</div>
+            </div>
+            <div class="panel-body">
+              <div class="summary-grid">
+                <div class="summary-card">
+                  <strong id="uploadedCount">0</strong>
+                  <span>PDF 上传个数</span>
+                </div>
+                <div class="summary-card pass">
+                  <strong id="processedCount">0</strong>
+                  <span>已处理个数</span>
+                </div>
+                <div class="summary-card warn">
+                  <strong id="processingCount">0</strong>
+                  <span>处理中个数</span>
+                </div>
+                <div class="summary-card">
+                  <strong id="standardCount">0</strong>
+                  <span>已识别标准条数</span>
+                </div>
+                <div class="summary-card pass">
+                  <strong id="passCount">0</strong>
+                  <span>完全符合条数</span>
+                </div>
+                <div class="summary-card warn">
+                  <strong id="mismatchCount">0</strong>
+                  <span>不一致个数</span>
+                </div>
+                <div class="summary-card error">
+                  <strong id="missingCount">0</strong>
+                  <span>未命中个数</span>
+                </div>
+                <div class="summary-card warn">
+                  <strong id="reviewCount">0</strong>
+                  <span>待复核个数</span>
+                </div>
+              </div>
+              <div class="summary-list" id="summaryList"></div>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div class="panel-title">3. 分步骤任务结果明细</div>
+          </div>
+          <div class="panel-body">
+            <div class="message info show" id="message">选择 PDF 后点击“开始识别”。如果后端未启动，请先运行 FastAPI 服务。</div>
+
+            <section class="step-block">
+              <div class="step-title">
+                <span>标准提取比对结果</span>
+                <span class="step-note">按 PDF 汇总，保留来源表格</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>PDF</th>
+                      <th>识别标准号</th>
+                      <th>标准库匹配</th>
+                      <th>结论</th>
+                      <th>来源表格</th>
+                      <th>建议</th>
+                    </tr>
+                  </thead>
+                  <tbody id="standardBody">
+                    <tr>
+                      <td colspan="6"><div class="empty">暂无标准比对结果</div></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="step-block">
+              <div class="step-title">
+                <span>图纸识别结果</span>
+                <span class="step-note">PDF 明细</span>
+              </div>
+              <div class="stats">
+                <div class="stat">
+                  <div class="num" id="taskId">-</div>
+                  <div class="label">任务 ID</div>
+                </div>
+                <div class="stat">
+                  <div class="num" id="pdfCount">0</div>
+                  <div class="label">当前任务 PDF 个数</div>
+                </div>
+                <div class="stat">
+                  <div class="num" id="tableCount">0</div>
+                  <div class="label">识别表格</div>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>PDF</th>
+                      <th>图号</th>
+                      <th>项目名称</th>
+                      <th>装置 / 设备</th>
+                      <th>专业</th>
+                      <th>阶段</th>
+                      <th>状态</th>
+                    </tr>
+                  </thead>
+                  <tbody id="drawingBody">
+                    <tr>
+                      <td colspan="7"><div class="empty">暂无图纸识别结果</div></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="step-block">
+              <div class="step-title">
+                <span>表格解析结果</span>
+                <span class="step-note">裁剪区块明细</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>序号</th>
+                      <th>来源 PDF</th>
+                      <th>表格类型</th>
+                      <th>置信度</th>
+                      <th>坐标 bbox</th>
+                      <th>裁剪文件</th>
+                    </tr>
+                  </thead>
+                  <tbody id="resultBody">
+                    <tr>
+                      <td colspan="6"><div class="empty">暂无识别结果</div></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <details>
+              <summary>原始 JSON</summary>
+              <pre id="rawJson">{}</pre>
+            </details>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      file: null,
+      result: null,
+      loading: false
+    };
+
+    const fileInput = document.getElementById("fileInput");
+    const uploadZone = document.getElementById("uploadZone");
+    const uploadBtn = document.getElementById("uploadBtn");
+    const demoBtn = document.getElementById("demoBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const fileMeta = document.getElementById("fileMeta");
+    const apiInput = document.getElementById("apiInput");
+    const message = document.getElementById("message");
+    const statusPill = document.getElementById("statusPill");
+    const statusText = document.getElementById("statusText");
+    const uploadedCount = document.getElementById("uploadedCount");
+    const processedCount = document.getElementById("processedCount");
+    const processingCount = document.getElementById("processingCount");
+    const standardCount = document.getElementById("standardCount");
+    const passCount = document.getElementById("passCount");
+    const mismatchCount = document.getElementById("mismatchCount");
+    const missingCount = document.getElementById("missingCount");
+    const reviewCount = document.getElementById("reviewCount");
+    const summaryList = document.getElementById("summaryList");
+    const taskId = document.getElementById("taskId");
+    const pdfCount = document.getElementById("pdfCount");
+    const tableCount = document.getElementById("tableCount");
+    const drawingBody = document.getElementById("drawingBody");
+    const resultBody = document.getElementById("resultBody");
+    const standardBody = document.getElementById("standardBody");
+    const rawJson = document.getElementById("rawJson");
+
+    const demoPayload = {
+      code: 200,
+      msg: "演示数据已加载：完成图纸表格区块识别",
+      data: {
+        task_id: "demo_njpc_001",
+        filename: "25.918-1 A1_压力容器装配图.pdf",
+        total_pdfs: 3,
+        total_pages: 3,
+        total_tables: 8,
+        pdf_path: "tmp/uploads/25.918-1_A1_demo.pdf",
+        pdfs: [
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            status: "已处理",
+            project_name: "南京石化炼油装置改造项目",
+            unit_name: "加氢裂化联合装置",
+            equipment_name: "E-450401 换热器",
+            drawing_no: "25.918-1 A1",
+            discipline: "设备专业",
+            design_stage: "施工图",
+            table_count: 3,
+            standard_count: 2,
+            issue_count: 1
+          },
+          {
+            pdf_name: "14.751-1-A1(E-450401)_管口方位图.pdf",
+            status: "已处理",
+            project_name: "南京石化炼油装置改造项目",
+            unit_name: "加氢裂化联合装置",
+            equipment_name: "E-450401 管口方位",
+            drawing_no: "14.751-1-A1",
+            discipline: "设备专业",
+            design_stage: "施工图",
+            table_count: 2,
+            standard_count: 2,
+            issue_count: 1
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            status: "已处理",
+            project_name: "南京石化炼油装置改造项目",
+            unit_name: "加氢裂化联合装置",
+            equipment_name: "V-182108 容器",
+            drawing_no: "03.276-1 A1V",
+            discipline: "设备专业",
+            design_stage: "施工图",
+            table_count: 3,
+            standard_count: 2,
+            issue_count: 1
+          }
+        ],
+        drawing_info: {
+          project_name: "南京石化炼油装置改造项目",
+          unit_name: "加氢裂化联合装置",
+          equipment_name: "E-450401 换热器",
+          drawing_no: "25.918-1 A1",
+          discipline: "设备专业",
+          design_stage: "施工图",
+          scale: "1:20",
+          drawing_date: "2026-05-18",
+          designer: "王工",
+          checker: "李工"
+        },
+        tables: [
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            page: 1,
+            table_index: 1,
+            label: "标题栏 / 签审栏",
+            score: 0.982,
+            bbox: [3182, 2136, 4558, 3208],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_001_table_001.png"
+          },
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            page: 1,
+            table_index: 2,
+            label: "技术要求表",
+            score: 0.946,
+            bbox: [186, 142, 1848, 826],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_001_table_002.png"
+          },
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            page: 1,
+            table_index: 3,
+            label: "材料明细表",
+            score: 0.927,
+            bbox: [2564, 138, 4548, 1042],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_001_table_003.png"
+          },
+          {
+            pdf_name: "14.751-1-A1(E-450401)_管口方位图.pdf",
+            page: 1,
+            table_index: 1,
+            label: "管口表",
+            score: 0.914,
+            bbox: [226, 1684, 1588, 2568],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_002_table_001.png"
+          },
+          {
+            pdf_name: "14.751-1-A1(E-450401)_管口方位图.pdf",
+            page: 1,
+            table_index: 2,
+            label: "焊接参数表",
+            score: 0.871,
+            bbox: [1828, 1548, 3288, 2366],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_002_table_002.png"
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            page: 1,
+            table_index: 1,
+            label: "制造检验要求",
+            score: 0.889,
+            bbox: [148, 116, 1876, 742],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_003_table_001.png"
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            page: 1,
+            table_index: 2,
+            label: "标准引用清单",
+            score: 0.834,
+            bbox: [2214, 402, 4528, 1288],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_003_table_002.png"
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            page: 1,
+            table_index: 1,
+            label: "局部详图说明",
+            score: 0.763,
+            bbox: [496, 1776, 2196, 2504],
+            image_path: "tmp/table_blocks/demo_njpc_001/page_004_table_001.png"
+          }
+        ],
+        standards: [
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            standard_no: "GB/T 150.1-2011",
+            matched_standard: "GB/T 150.1-2011",
+            status: "完全符合",
+            result_type: "pass",
+            source_table: "技术要求表 #2",
+            confidence: 0.96,
+            suggestion: "无需处理"
+          },
+          {
+            pdf_name: "25.918-1 A1_压力容器装配图.pdf",
+            standard_no: "NB/T 47041-2014",
+            matched_standard: "NB/T 47041-2022",
+            status: "年份不一致",
+            result_type: "warn",
+            source_table: "材料明细表 #3",
+            confidence: 0.93,
+            suggestion: "建议确认是否更新至现行版本"
+          },
+          {
+            pdf_name: "14.751-1-A1(E-450401)_管口方位图.pdf",
+            standard_no: "HG/T 20592-2009",
+            matched_standard: "HG/T 20592-2009",
+            status: "完全符合",
+            result_type: "pass",
+            source_table: "管口表 #4",
+            confidence: 0.91,
+            suggestion: "无需处理"
+          },
+          {
+            pdf_name: "14.751-1-A1(E-450401)_管口方位图.pdf",
+            standard_no: "NB/T 47015-2011",
+            matched_standard: "NB/T 47015-2023",
+            status: "存在更新版本",
+            result_type: "warn",
+            source_table: "焊接参数表 #5",
+            confidence: 0.88,
+            suggestion: "建议由设备专业复核版本适用性"
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            standard_no: "JB/T 4730-2005",
+            matched_standard: "-",
+            status: "标准库未命中",
+            result_type: "error",
+            source_table: "制造检验要求 #6",
+            confidence: 0.82,
+            suggestion: "补充标准库或确认识别文本"
+          },
+          {
+            pdf_name: "03.276-1_A1V(V-182108)_制造检验图.pdf",
+            standard_no: "NB/T 47018.4-2022",
+            matched_standard: "NB/T 47018.4-2022",
+            status: "完全符合",
+            result_type: "pass",
+            source_table: "标准引用清单 #7",
+            confidence: 0.94,
+            suggestion: "无需处理"
+          }
+        ]
+      }
+    };
+
+    function formatSize(bytes) {
+      if (!bytes) return "0 KB";
+      const units = ["B", "KB", "MB", "GB"];
+      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+    }
+
+    function setMessage(type, text) {
+      message.className = `message ${type} show`;
+      message.textContent = text;
+    }
+
+    function setStatus(type, text) {
+      statusPill.className = `status-pill ${type}`;
+      statusText.textContent = text;
+    }
+
+    function setFile(file) {
+      if (!file) return;
+      state.file = file;
+      uploadBtn.disabled = false;
+      clearBtn.disabled = false;
+      fileMeta.innerHTML = `
+        <strong>${file.name}</strong><br>
+        <span class="muted">${formatSize(file.size)} · ${file.type || "PDF"}</span>
+      `;
+      setMessage("info", "文件已选择，可以开始识别。");
+      setStatus("ready", "已选择文件");
+    }
+
+    function resetResult() {
+      state.result = null;
+      uploadedCount.textContent = "0";
+      processedCount.textContent = "0";
+      processingCount.textContent = "0";
+      standardCount.textContent = "0";
+      passCount.textContent = "0";
+      mismatchCount.textContent = "0";
+      missingCount.textContent = "0";
+      reviewCount.textContent = "0";
+      summaryList.innerHTML = '<div class="empty">暂无审查结果</div>';
+      taskId.textContent = "-";
+      pdfCount.textContent = "0";
+      tableCount.textContent = "0";
+      drawingBody.innerHTML = '<tr><td colspan="7"><div class="empty">暂无图纸识别结果</div></td></tr>';
+      resultBody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无识别结果</div></td></tr>';
+      standardBody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无标准比对结果</div></td></tr>';
+      rawJson.textContent = "{}";
+    }
+
+    function clearAll() {
+      state.file = null;
+      fileInput.value = "";
+      uploadBtn.disabled = true;
+      clearBtn.disabled = true;
+      fileMeta.innerHTML = '<span class="muted">尚未选择文件</span>';
+      resetResult();
+      setMessage("info", "选择 PDF 后点击“开始识别”。如果后端未启动，请先运行 FastAPI 服务。");
+      setStatus("ready", "待上传");
+    }
+
+    function loadDemoData() {
+      state.file = null;
+      state.result = demoPayload;
+      fileInput.value = "";
+      uploadBtn.disabled = true;
+      clearBtn.disabled = false;
+      fileMeta.innerHTML = `
+        <strong>${demoPayload.data.filename}</strong><br>
+        <span class="muted">演示样例 · 3 个单页 PDF · 已识别 8 个表格区块</span>
+      `;
+      renderResult(demoPayload);
+      setStatus("ready", "演示数据");
+      setMessage("success", demoPayload.msg);
+    }
+
+    function renderDrawingTable(data, sourcePdfName) {
+      const info = data.drawing_info || {};
+      const rows = Array.isArray(data.pdfs) && data.pdfs.length
+        ? data.pdfs
+        : [{
+          pdf_name: sourcePdfName || "-",
+          status: "已处理",
+          project_name: info.project_name,
+          unit_name: info.unit_name,
+          equipment_name: info.equipment_name,
+          drawing_no: info.drawing_no,
+          discipline: info.discipline,
+          design_stage: info.design_stage
+        }];
+
+      drawingBody.innerHTML = rows.map((item) => {
+        const statusType = item.status === "已处理" ? "pass" : "warn";
+        return `
+          <tr>
+            <td><div class="pdf-name" title="${item.pdf_name || "-"}">${item.pdf_name || "-"}</div></td>
+            <td>${item.drawing_no || "-"}</td>
+            <td>${item.project_name || "-"}</td>
+            <td>${[item.unit_name, item.equipment_name].filter(Boolean).join(" / ") || "-"}</td>
+            <td>${item.discipline || "-"}</td>
+            <td>${item.design_stage || "-"}</td>
+            <td><span class="${standardTagClass(statusType)}">${item.status || "待处理"}</span></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function standardTagClass(type) {
+      if (type === "pass") return "result-tag pass";
+      if (type === "error") return "result-tag error";
+      return "result-tag warn";
+    }
+
+    function renderSummary(data, tables, standards, pdfCountValue, sourcePdfName) {
+      const pdfs = Array.isArray(data.pdfs) && data.pdfs.length
+        ? data.pdfs
+        : [{
+          pdf_name: sourcePdfName || "-",
+          status: standards.length || tables.length ? "已处理" : "待处理",
+          table_count: tables.length,
+          standard_count: standards.length,
+          issue_count: standards.filter((item) => item.result_type !== "pass").length
+        }];
+
+      const processed = pdfs.filter((item) => item.status === "已处理").length;
+      const processing = pdfs.filter((item) => item.status === "处理中").length;
+      const pass = standards.filter((item) => item.result_type === "pass").length;
+      const missing = standards.filter((item) => item.result_type === "error" || item.status === "标准库未命中").length;
+      const mismatch = standards.filter((item) => item.result_type === "warn").length;
+      const review = mismatch + missing;
+
+      uploadedCount.textContent = pdfCountValue;
+      processedCount.textContent = processed;
+      processingCount.textContent = processing;
+      standardCount.textContent = standards.length;
+      passCount.textContent = pass;
+      mismatchCount.textContent = mismatch;
+      missingCount.textContent = missing;
+      reviewCount.textContent = review;
+
+      summaryList.innerHTML = pdfs.map((item) => {
+        const tagType = item.status === "已处理" ? "pass" : "warn";
+        return `
+          <div class="summary-row">
+            <div>
+              <strong title="${item.pdf_name || "-"}">${item.pdf_name || "-"}</strong>
+              <div class="muted">${item.table_count || 0} 个表格 · ${item.standard_count || 0} 条标准 · ${item.issue_count || 0} 条需关注</div>
+            </div>
+            <span class="${standardTagClass(tagType)}">${item.status || "待处理"}</span>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderResult(payload) {
+      const data = payload.data || {};
+      const tables = Array.isArray(data.tables) ? data.tables : [];
+      const standards = Array.isArray(data.standards) ? data.standards : [];
+      const sourcePdfName = data.filename || (state.file && state.file.name) || (data.pdf_path ? data.pdf_path.split(/[\\/]/).pop() : "");
+      const inferredPdfCount = data.total_pdfs || new Set(tables.map((item) => item.pdf_name || sourcePdfName).filter(Boolean)).size || (sourcePdfName ? 1 : 0);
+
+      taskId.textContent = data.task_id || "-";
+      pdfCount.textContent = inferredPdfCount;
+      tableCount.textContent = data.total_tables || tables.length;
+      renderSummary(data, tables, standards, inferredPdfCount, sourcePdfName);
+      renderDrawingTable(data, sourcePdfName);
+      rawJson.textContent = JSON.stringify(payload, null, 2);
+
+      if (!tables.length) {
+        resultBody.innerHTML = '<tr><td colspan="6"><div class="empty">接口返回成功，但没有识别到表格区块</div></td></tr>';
+      } else {
+        resultBody.innerHTML = tables.map((item, index) => {
+          const score = Number(item.score || 0);
+          const scoreClass = score >= 0.8 ? "score" : "score warn";
+          const globalIndex = index + 1;
+          return `
+            <tr>
+              <td>${globalIndex}</td>
+              <td>${item.pdf_name || sourcePdfName || "-"}</td>
+              <td>${item.label || "table"}</td>
+              <td><span class="${scoreClass}">${score.toFixed(3)}</span></td>
+              <td>${Array.isArray(item.bbox) ? item.bbox.join(", ") : "-"}</td>
+              <td><div class="path" title="${item.image_path || ""}">${item.image_path || "-"}</div></td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      if (!standards.length) {
+        standardBody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无标准比对结果</div></td></tr>';
+      } else {
+        standardBody.innerHTML = standards.map((item) => `
+          <tr>
+            <td>${item.pdf_name || "-"}</td>
+            <td>${item.standard_no || "-"}</td>
+            <td>${item.matched_standard || "-"}</td>
+            <td><span class="${standardTagClass(item.result_type)}">${item.status || "-"}</span></td>
+            <td>${item.source_table || "-"}</td>
+            <td>${item.suggestion || "-"}</td>
+          </tr>
+        `).join("");
+      }
+    }
+
+    async function uploadFile() {
+      if (!state.file || state.loading) return;
+
+      state.loading = true;
+      uploadBtn.disabled = true;
+      setStatus("loading", "识别中");
+      setMessage("info", "正在上传并识别，超高分辨率 PDF 可能需要等待一会儿。");
+
+      try {
+        const formData = new FormData();
+        formData.append("file", state.file);
+
+        const response = await fetch(apiInput.value.trim(), {
+          method: "POST",
+          body: formData
+        });
+
+        const payload = await response.json();
+        state.result = payload;
+
+        if (!response.ok || payload.code !== 200) {
+          throw new Error(payload.msg || `接口请求失败：${response.status}`);
+        }
+
+        renderResult(payload);
+        setStatus("ready", "识别完成");
+        setMessage("success", payload.msg || "表格区块提取完成。");
+      } catch (error) {
+        resetResult();
+        setStatus("error", "识别失败");
+        setMessage("error", error.message || "接口请求失败，请检查后端服务和接口地址。");
+      } finally {
+        state.loading = false;
+        uploadBtn.disabled = !state.file;
+      }
+    }
+
+    uploadZone.addEventListener("click", () => fileInput.click());
+    uploadZone.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    fileInput.addEventListener("change", (event) => {
+      const [file] = event.target.files;
+      setFile(file);
+    });
+
+    uploadZone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      uploadZone.classList.add("dragging");
+    });
+
+    uploadZone.addEventListener("dragleave", () => {
+      uploadZone.classList.remove("dragging");
+    });
+
+    uploadZone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      uploadZone.classList.remove("dragging");
+      const [file] = event.dataTransfer.files;
+      if (!file || !file.name.toLowerCase().endsWith(".pdf")) {
+        setMessage("error", "请选择 PDF 文件。");
+        return;
+      }
+      setFile(file);
+    });
+
+    uploadBtn.addEventListener("click", uploadFile);
+    demoBtn.addEventListener("click", loadDemoData);
+    clearBtn.addEventListener("click", clearAll);
+    loadDemoData();
+  </script>
+</body>
+</html>
