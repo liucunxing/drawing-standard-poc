@@ -2,7 +2,7 @@
   "project": "drawing-standard-mvp",
   "phase": "React MVP implementation",
   "state": "CLOSE",
-  "status": "LOCAL_CANDIDATE_COMPLETE_TRIAL_BLOCKED",
+  "status": "LOCAL_FRONTEND_CANDIDATE_COMPLETE_WITH_FINDINGS",
   "frozen_contracts": [
     "docs/project_input.md",
     "docs/api_contract.md",
@@ -17,9 +17,10 @@
   "active_tasks": [],
   "open_findings": [
     "P1 external: real FastAPI/MySQL/GPU/customer-PDF trial not available",
-    "P2 external: Docker image build blocked by Docker Hub EOF"
+    "P2 external: Docker image build blocked by Docker Hub EOF",
+    "Contract constraint: origin/master 1676ff2 exposes task_name but no persisted description/remark input"
   ],
   "repair_round": 1,
-  "last_gate": "FINAL_REVIEW_LOCAL_PASS_TRIAL_BLOCKED",
-  "next_allowed_action": "Provide a reachable FastAPI/MySQL/GPU environment and representative PDFs, then run trial acceptance"
+  "last_gate": "FINAL_REVIEW_PASS_WITH_FINDINGS",
+  "next_allowed_action": "Review the local frontend candidate; if persisted remarks are required, approve a separate backend and database contract change"
 }

@@ -1,19 +1,22 @@
 # Project Status
 
 - State: CLOSE
-- Final verdict: local React MVP code candidate PASS; internal trial release BLOCKED; production readiness not claimed
+- Latest continuation verdict: new-review local React frontend candidate `PASS WITH FINDINGS`; no blocking implementation defect
+- Delivery decision: frontend candidate is ready for local review; real remark persistence, real-backend trial readiness and production readiness are not claimed
 - Governance: Controlled
-- Baseline SHA: `bce80a06bb16f0a77327cc38924f4bc0ba056937`
+- Frontend baseline SHA: `a856bbcf52686526aa05745c1f53b56ab85cb035`
+- Latest server reference: fetched `origin/master@1676ff2ac0b9a0cdccdd8e0d167b8d03659f5c5e`; not merged because it is an unrelated forced rewrite with no `frontend/`
 - Baseline exploration: complete
 - Product/UX decisions: frozen by approved implementation plan and `docs/product_ux_brief.md`
 - API contract: frozen in `docs/api_contract.md`
 - React MVP implementation: integrated across shell/dashboard, upload/task flow, four-tab detail, standards CRUD and deployment
-- Local verification: lint, typecheck, 12 unit tests, production build, 10 root-path plus 10 subpath Playwright desktop tests, 3 backend security tests and Compose configuration passed
-- Visual review: mock-backed browser walkthrough completed with zero console errors; screenshots retained locally under `output/playwright/`
-- QA result: two P2 implementation findings repaired and independently closed; seven screenshot artifacts verified
-- Final review: complete
+- Latest local verification: lint, typecheck, 20 unit tests, production build, 10 root-path plus 10 `/drawing-review` Playwright desktop tests passed
+- Latest visual review: task/form/config/upload journey, reset and exit passed at 1366×768 and 1920×1080 with final console 0 errors/0 warnings; four screenshots retained under `output/playwright/new-review-*.png`
+- Latest QA result: `PASS WITH FINDINGS`; no P0/P1 and no P2 implementation finding
+- Latest final review: `PASS WITH FINDINGS`
 - Blockers: none for implementation
+- Contract limitation: current backend ignores and does not persist or return frontend `description`; persisted remark/configuration requires a separately approved backend/database change
 - External acceptance inputs still required: representative customer PDFs and reachable trial backend/DB/GPU environment
-- Known non-blocking build finding: Ant Design entry chunk is 665 kB minified (216 kB gzip)
+- Known non-blocking build finding: Ant Design entry chunk is 682.93 kB minified (224.00 kB gzip)
 - Docker image build: not verified because Docker Hub returned an external EOF while resolving `nginx:1.27-alpine`; Compose rendering passed
-- Next allowed action: provide a reachable FastAPI/MySQL/GPU environment plus 3–5 representative PDFs, restore Docker registry access, then execute the real trial gate
+- Next allowed action: review the local frontend candidate; if stored remarks are required, approve a new backend/database contract before real trial validation

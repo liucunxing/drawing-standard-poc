@@ -12,3 +12,15 @@
 | GATE-001 delivery review | Final reviewer | QA pass | release verdict and residual risks |
 
 Integration order: foundation → shell/workflow/results/standards → deployment → UX review → QA → repairs → final gate.
+
+## New-review metadata continuation (2026-08-01)
+
+| Ticket | Owner | Dependency | Acceptance |
+|---|---|---|---|
+| DRMVP-20260801-EXP-01 | Explorer | latest `origin/master` fetched | upload contract and persistence facts confirmed read-only |
+| DRMVP-20260801-PLAN-01 | Planner / Conflict Reviewer | exploration | transport-only metadata rule and exact description composition frozen |
+| DRMVP-20260801-FE-01 | Frontend workflow | contract freeze | three containers, validation, configuration, request state and centered actions |
+| DRMVP-20260801-QA-01 | QA | integration and UX repair | independent contract, functional and visual regression |
+| DRMVP-20260801-GATE-01 | Final reviewer | QA pass | local candidate verdict with real-backend limitations retained |
+
+Status: all continuation tickets complete; local frontend candidate `PASS WITH FINDINGS`.

@@ -18,3 +18,19 @@
 - Contract-first ownership kept parallel page work disjoint; integration required only shared-state and presentation cleanup.
 - Mock-backed browser walkthrough caught display issues before QA, while independent QA found two adapter/empty-state edge cases that unit tests had missed.
 - Future runs should provision the real backend/GPU environment and Docker registry access before the final gate; without them, the correct terminal state is a local candidate rather than a trial release.
+
+## 2026-08-01 New-review metadata continuation
+
+| Ticket | Agent | Result | Evidence / Next action |
+|---|---|---|---|
+| DRMVP-20260801-EXP-01 | Explorer | Complete, read-only | Latest `origin/master@1676ff2` has upload `files` plus optional `task_name`, but no persisted description/remark |
+| DRMVP-20260801-PLAN-01 | Planner / Conflict Reviewer | Complete | Forward-compatible `description` transport frozen; task metadata never encoded into task name |
+| DRMVP-20260801-FE-01 | Frontend workflow | Complete | Three-container form, validation, configuration composition, request forwarding and centered actions integrated |
+| DRMVP-20260801-QA-01 | QA | PASS WITH FINDINGS | No implementation finding; real persistence/backend trial and existing chunk warning retained |
+| DRMVP-20260801-GATE-01 | Final Reviewer | PASS WITH FINDINGS | Local frontend candidate deliverable; real persistence and real-backend trial not claimed |
+
+### Continuation retrospective
+
+- Focused request tests protected the multipart/query contract, while real browser DOM measurement found and closed an upload/action overlap invisible to route smoke tests.
+- The forced, unrelated `master` rewrite was fetched and inspected without merging, preserving the React branch and protected backend scope.
+- A future persistence phase requires an explicit backend/database contract; a frontend-only query parameter cannot be treated as stored truth.

@@ -17,6 +17,13 @@ All business responses use `ApiEnvelope<T> = { code: number; msg: string; data: 
 | Standard delete | `DELETE /api/standard-data/{id}` |
 | Files | `GET /api/files/{relative-path}` |
 
+## Frontend-only metadata compatibility
+
+- The new-review client sends trimmed `task_name` through the existing optional upload query parameter.
+- The client also sends a forward-compatible `description` query parameter containing the user remark and selected recognition configuration.
+- `origin/master` at `1676ff2` does not declare, persist, or return `description`; this transport-only parameter must not be reported as stored data until a separately approved backend/database contract exists.
+- Remarks and recognition configuration must never be encoded into `task_name`, because the backend uses that value in the task ID and upload directory.
+
 ## Status semantics
 
 - Task status: `0` pending, `1` processing, `2` complete, `3` failed. Unknown values are shown verbatim/neutrally.

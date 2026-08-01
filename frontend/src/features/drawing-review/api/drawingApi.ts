@@ -68,14 +68,20 @@ export function normalizeTaskDetail(raw: RawTask): TaskDetail {
   }
 }
 
-export async function uploadPdfs(files: File[], taskName?: string): Promise<UploadResult> {
+export async function uploadPdfs(files: File[], taskName?: string, description?: string): Promise<UploadResult> {
   const formData = new FormData()
   files.forEach((file) => formData.append('files', file))
+  const normalizedTaskName = taskName?.trim()
+  const normalizedDescription = description?.trim()
+  const params = normalizedTaskName || normalizedDescription ? {
+    ...(normalizedTaskName ? { task_name: normalizedTaskName } : {}),
+    ...(normalizedDescription ? { description: normalizedDescription } : {}),
+  } : undefined
   return apiRequest<UploadResult>({
     method: 'POST',
     url: '/drawing/upload-pdf',
     data: formData,
-    params: taskName?.trim() ? { task_name: taskName.trim() } : undefined,
+    params,
     timeout: 3_600_000,
   })
 }

@@ -1,9 +1,21 @@
 .content { display: grid; gap: 20px; }
 .panel { background: #fff; border: 1px solid #e3e8ef; border-radius: 4px; padding: 20px; }
+.panelTitle { margin: 0 0 16px; color: #1d2939; font-size: 16px; font-weight: 600; line-height: 24px; }
 .hint { margin: 0 0 16px; color: #667085; line-height: 22px; }
+.configGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 16px; }
+.uploadDragger { display: block; height: 320px; }
 .fileList { margin-top: 16px; }
 .fileName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.resetButton { color: #475467; border-color: #d0d5dd; background: #f8fafc; }
 .progress { margin-top: 18px; }
 .progressText { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 8px; color: #475467; }
 .error { margin-top: 16px; }
+
+@media (max-width: 1280px) {
+  .configGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 768px) {
+  .uploadDragger { height: 240px; }
+}

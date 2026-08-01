@@ -14,7 +14,7 @@ interface UploadState {
   removeFile: (index: number) => void
   clearFiles: () => void
   resetRun: () => void
-  run: () => Promise<string | null>
+  run: (taskName: string, description: string) => Promise<string | null>
 }
 
 const uniqueFiles = (existing: File[], incoming: File[]): File[] => {
@@ -38,13 +38,13 @@ export const useUploadStore = create<UploadState>((set, get) => ({
   removeFile: (index) => set((state) => ({ files: state.files.filter((_, itemIndex) => itemIndex !== index) })),
   clearFiles: () => set({ files: [] }),
   resetRun: () => set({ status: 'idle', taskId: null, currentFileIndex: 0, currentFileName: '', errorMessage: null }),
-  run: async () => {
+  run: async (taskName, description) => {
     const files = get().files
     if (!files.length || get().status === 'uploading' || get().status === 'processing') return null
 
     set({ status: 'uploading', taskId: null, currentFileIndex: 0, currentFileName: '', errorMessage: null })
     try {
-      const upload = await uploadPdfs(files)
+      const upload = await uploadPdfs(files, taskName, description)
       const taskId = upload.task_id
       const fileNames = upload.file_names.length ? upload.file_names : files.map((file) => file.name)
       set({ status: 'processing', taskId })
