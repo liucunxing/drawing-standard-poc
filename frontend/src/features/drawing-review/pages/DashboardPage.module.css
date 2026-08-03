@@ -6,7 +6,8 @@
 }
 
 .metricCard :global(.ant-card-body) {
-  padding: 18px 20px;
+  min-height: 112px;
+  padding: 20px;
 }
 
 .neutral { color: inherit; }
@@ -33,6 +34,79 @@
 .green .metricValue { color: #389e0d; }
 .red .metricValue { color: #d92d20; }
 
+.quickActionsCard {
+  margin-bottom: 20px;
+}
+
+.quickActionsCard :global(.ant-card-head) {
+  min-height: 52px;
+}
+
+.quickActionsCard :global(.ant-card-head-title) {
+  color: #172033;
+  font-weight: 600;
+}
+
+.quickActionsCard :global(.ant-card-body) {
+  padding: 20px;
+}
+
+.quickActions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 220px));
+  gap: 16px;
+}
+
+.quickActionButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 116px;
+  padding: 18px;
+  color: #1f5f99;
+  background: #fff;
+  border: 1px solid #1f5f99;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.quickActionButton:hover {
+  background: #f3f7fb;
+  border-color: #174d7d;
+}
+
+.quickActionButton:focus-visible {
+  outline: 2px solid #1f5f99;
+  outline-offset: 2px;
+}
+
+.quickActionButton:disabled {
+  color: #98a2b3;
+  background: #f8fafc;
+  border-color: #d0d5dd;
+  cursor: not-allowed;
+}
+
+.primaryAction,
+.primaryAction:hover {
+  color: #fff;
+  background: #1f5f99;
+  border-color: #1f5f99;
+}
+
+.primaryAction:hover {
+  background: #174d7d;
+}
+
+.quickActionIcon {
+  font-size: 26px;
+}
+
 .taskCard :global(.ant-card-head) {
   min-height: 52px;
 }
@@ -49,4 +123,9 @@
   overflow: hidden;
   text-align: left;
   text-overflow: ellipsis;
+}
+
+.rulesUnavailable {
+  margin: 8px 0 4px;
+  color: #475467;
 }

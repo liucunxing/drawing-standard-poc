@@ -1,5 +1,5 @@
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Button, Card, Empty, Table, Typography, notification } from 'antd'
+import { HistoryOutlined, PlusOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
+import { Button, Card, Empty, Modal, Table, Typography, notification } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -31,6 +31,7 @@ export function DashboardPage() {
   const [tasks, setTasks] = useState<TaskSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [rulesModalOpen, setRulesModalOpen] = useState(false)
 
   const loadTasks = useCallback(async () => {
     setLoading(true)
@@ -91,18 +92,48 @@ export function DashboardPage() {
       {notificationContext}
       <div className="page-header">
         <div>
-          <h1 className="page-title">工作台</h1>
-          <p className="page-description">查看近期图纸审查任务及处理状态。</p>
+          <h1 className="page-title">数据统计总览</h1>
+          <p className="page-description">查看图纸审查任务统计、快捷入口及最近任务。</p>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/tasks/new')}>新建审查</Button>
       </div>
 
-      <section className={styles.metrics} aria-label="近期任务统计">
-        <MetricCard label="近期任务" value={metrics.recent} />
-        <MetricCard label="处理中" value={metrics.processing} tone="blue" />
-        <MetricCard label="已完成" value={metrics.completed} tone="green" />
-        <MetricCard label="异常" value={metrics.failed} tone="red" />
+      <section className={styles.metrics} aria-label="数据统计总览">
+        <MetricCard label="所有任务数量" value={metrics.recent} />
+        <MetricCard label="进行中任务数量" value={metrics.processing} tone="blue" />
+        <MetricCard label="审核确认任务数量" value={metrics.completed} tone="green" />
+        <MetricCard label="报错任务数量" value={metrics.failed} tone="red" />
       </section>
+
+      <Card className={styles.quickActionsCard} title="快捷功能入口" variant="outlined">
+        <div className={styles.quickActions}>
+          <button
+            type="button"
+            className={`${styles.quickActionButton} ${styles.primaryAction}`}
+            onClick={() => navigate('/tasks/new')}
+          >
+            <PlusOutlined className={styles.quickActionIcon} />
+            <span>创建识别任务</span>
+          </button>
+          <button
+            type="button"
+            className={styles.quickActionButton}
+            disabled={loading}
+            onClick={() => void loadTasks()}
+          >
+            <HistoryOutlined className={styles.quickActionIcon} />
+            <span>查询历史识别任务</span>
+          </button>
+          <button
+            type="button"
+            className={styles.quickActionButton}
+            onClick={() => setRulesModalOpen(true)}
+          >
+            <SettingOutlined className={styles.quickActionIcon} />
+            <span>配置识别规则</span>
+          </button>
+        </div>
+      </Card>
+
       <Card className={styles.taskCard} title="最近任务" variant="outlined">
         <Table<TaskSummary>
           rowKey={(task) => task.task_id}
@@ -124,6 +155,15 @@ export function DashboardPage() {
           }}
         />
       </Card>
+
+      <Modal
+        title="配置识别规则"
+        open={rulesModalOpen}
+        onCancel={() => setRulesModalOpen(false)}
+        footer={<Button type="primary" onClick={() => setRulesModalOpen(false)}>我知道了</Button>}
+      >
+        <p className={styles.rulesUnavailable}>暂不可配置识别规则</p>
+      </Modal>
     </main>
   )
 }

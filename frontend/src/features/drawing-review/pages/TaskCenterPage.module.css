@@ -1,4 +1,97 @@
-.filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
-.tableCard { background: #fff; border: 1px solid #e3e8ef; border-radius: 4px; padding: 16px 16px 0; }
-.taskName { color: #175cd3; cursor: pointer; font-weight: 500; }
-.subtle { margin-top: 3px; color: #667085; font-size: 12px; }
+.filterCard,
+.tableCard {
+  background: #fff;
+  border: 1px solid #e3e8ef;
+  border-radius: 4px;
+  padding: 20px;
+}
+
+.tableCard {
+  margin-top: 20px;
+}
+
+.sectionTitle {
+  margin: 0 0 18px;
+  color: #172033;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: minmax(260px, 2fr) minmax(180px, 1fr) minmax(300px, 1.5fr);
+  gap: 16px;
+}
+
+.filterField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.filterField label {
+  color: #344054;
+  font-weight: 500;
+}
+
+.filterField :global(.ant-select),
+.filterField :global(.ant-picker) {
+  width: 100%;
+}
+
+.filterActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.taskName {
+  height: auto;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  color: #175cd3;
+  cursor: pointer;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.subtle {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #667085;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tableCard :global(.ant-table-tbody > tr:nth-child(even) > td) {
+  background: #f8fafc;
+}
+
+.tableCard :global(.ant-table-tbody > tr:hover > td) {
+  background: #eef4fa;
+}
+
+.paginationBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding-top: 18px;
+}
+
+.pageSummary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #475467;
+  white-space: nowrap;
+}
+
+.totalCount {
+  margin-left: 8px;
+  color: #667085;
+}

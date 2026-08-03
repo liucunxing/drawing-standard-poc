@@ -9,7 +9,7 @@ import { useLocation, useNavigate, Outlet } from 'react-router-dom'
 import styles from './AppShell.module.css'
 
 const navigationItems = [
-  { key: '/dashboard', icon: <AppstoreOutlined />, label: '工作台' },
+  { key: '/dashboard', icon: <AppstoreOutlined />, label: '数据统计总览' },
   { key: '/tasks/new', icon: <FileAddOutlined />, label: '新建审查' },
   { key: '/tasks', icon: <UnorderedListOutlined />, label: '任务中心' },
   { key: '/standards', icon: <BookOutlined />, label: '标准库' },
