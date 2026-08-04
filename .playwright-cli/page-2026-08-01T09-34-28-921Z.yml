@@ -1,0 +1,87 @@
+- generic [ref=f3e1]:
+  - generic [ref=f3e4]:
+    - complementary [ref=f3e5]:
+      - generic [ref=f3e6]:
+        - generic "图纸标准审查" [ref=f3e7]: 审
+        - menu [ref=f3e10]:
+          - menuitem "appstore 工作台" [ref=f3e11] [cursor=pointer]:
+            - img "appstore" [ref=f3e12]
+            - generic [ref=f3e15]: 工作台
+          - menuitem "file-add 新建审查" [ref=f3e16] [cursor=pointer]:
+            - img "file-add" [ref=f3e17]
+            - generic [ref=f3e20]: 新建审查
+          - menuitem "unordered-list 任务中心" [ref=f3e21] [cursor=pointer]:
+            - img "unordered-list" [ref=f3e22]
+            - generic [ref=f3e25]: 任务中心
+          - menuitem "book 标准库" [ref=f3e26] [cursor=pointer]:
+            - img "book" [ref=f3e27]
+            - generic [ref=f3e30]: 标准库
+    - generic [ref=f3e31]:
+      - banner [ref=f3e32]:
+        - generic [ref=f3e33]: 工程图纸识别与标准审查
+      - main [ref=f3e34]:
+        - main [ref=f3e36]:
+          - generic [ref=f3e38]:
+            - heading "新建审查" [level=1] [ref=f3e39]
+            - paragraph [ref=f3e40]: 选择一个或多个图纸 PDF，系统将按选择顺序逐个进行识别与标准审查。
+          - generic [ref=f3e41]:
+            - region [ref=f3e42]:
+              - heading "任务信息" [level=2] [ref=f3e43]
+              - generic [ref=f3e45]:
+                - generic "任务名称" [ref=f3e47]
+                - textbox "任务名称" [ref=f3e51]:
+                  - /placeholder: 填写任务名称
+                  - text: 装置图纸审查
+              - generic [ref=f3e53]:
+                - generic "备注说明" [ref=f3e55]:
+                  - text: 备注说明
+                  - generic [ref=f3e56]: （可选）
+                - textbox "备注说明 （可选）" [ref=f3e60]:
+                  - /placeholder: 请输入备注说明
+                  - text: 人工复核备注
+            - region [ref=f3e61]:
+              - heading "图纸识别配置信息" [level=2] [ref=f3e62]
+              - generic [ref=f3e63]:
+                - generic [ref=f3e65]:
+                  - generic "专业分类" [ref=f3e67]
+                  - generic [ref=f3e73] [cursor=pointer]:
+                    - combobox "专业分类" [ref=f3e75]
+                    - generic "未知专业" [ref=f3e156]
+                - generic [ref=f3e77]:
+                  - generic "设备分类" [ref=f3e79]
+                  - generic [ref=f3e85] [cursor=pointer]:
+                    - combobox "设备分类" [ref=f3e87]
+                    - generic "未知设备" [ref=f3e165]
+                - generic [ref=f3e89]:
+                  - generic "图纸类型" [ref=f3e91]
+                  - generic [ref=f3e97] [cursor=pointer]:
+                    - combobox "图纸类型" [ref=f3e99]
+                    - generic "未知类型" [ref=f3e174]
+                - generic [ref=f3e101]:
+                  - generic "识别任务类型" [ref=f3e103]
+                  - generic [ref=f3e109] [cursor=pointer]:
+                    - combobox "识别任务类型" [expanded] [active] [ref=f3e111]:
+                      - listbox:
+                        - option "未知识别任务类型"
+                    - generic: 请选择识别任务类型
+            - region [ref=f3e112]:
+              - heading "上传图纸文件" [level=2] [ref=f3e113]
+              - paragraph [ref=f3e114]: 仅支持 PDF 格式。可一次选择多个文件，系统将按列表顺序处理。
+              - button [ref=f3e117] [cursor=pointer]:
+                - generic [ref=f3e118]:
+                  - paragraph [ref=f3e119]:
+                    - img "inbox" [ref=f3e120]
+                  - paragraph [ref=f3e123]: 点击或拖拽 PDF 到此区域
+                  - paragraph [ref=f3e124]: 可一次选择多个文件，将按列表顺序处理
+              - generic [ref=f3e125]: 暂未选择 PDF 文件
+            - generic [ref=f3e129]:
+              - button "check 提交识别任务" [ref=f3e130] [cursor=pointer]:
+                - img "check" [ref=f3e132]
+                - generic [ref=f3e135]: 提交识别任务
+              - button "sync 重置表单" [ref=f3e136] [cursor=pointer]:
+                - img "sync" [ref=f3e138]
+                - generic [ref=f3e141]: 重置表单
+              - button "rollback 退出页面" [ref=f3e142] [cursor=pointer]:
+                - img "rollback" [ref=f3e144]
+                - generic [ref=f3e147]: 退出页面
+  - generic "未知识别任务类型" [ref=f3e181] [cursor=pointer]

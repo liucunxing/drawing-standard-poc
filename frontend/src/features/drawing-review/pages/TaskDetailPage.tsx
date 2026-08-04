@@ -1,97 +1,232 @@
-import { Alert, Button, Card, Descriptions, Empty, Image, List, Progress, Radio, Select, Space, Spin, Tabs, Tag, notification } from 'antd'
+import { Alert, Button, Card, Descriptions, Empty, Image, Input, Select, Space, Spin, Table, Tabs, Tag, Typography, notification } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { getTaskDetail } from '../api/drawingApi'
-import { SafeMarkdown } from '../components/SafeMarkdown'
 import type { RecognitionTable, StandardMatch, TaskDetail } from '../types'
+import { readTaskSessionMetadata } from '../taskMetadata'
 import { resolveApiFileUrl } from '../../../shared/api/client'
-import { formatDateTime, formatFileSize, formatPercent } from '../../../shared/format'
+import { formatDateTime, formatFileSize } from '../../../shared/format'
 import { TaskStatusTag } from '../../../shared/taskStatus'
 import styles from './TaskDetailPage.module.css'
 
-const display = (value: string | number | null | undefined) => value === '' || value == null ? '—' : String(value)
-const standardColor = (status: string) => ({ 完全符合: 'success', 年份不一致: 'warning', 较为相似: 'processing', 不存在: 'error' }[status] || 'default')
+type ResultView = 'standard-info' | 'layout' | 'content' | 'analysis'
 
-function Overview({ detail }: { detail: TaskDetail }) {
-  return <Space direction="vertical" size={16} className={styles.fullWidth}>
-    {detail.error_message && <Alert type="error" showIcon message="任务处理异常" description={detail.error_message} />}
-    <Card size="small" title="任务信息">
-      <Descriptions column={3} size="small">
-        <Descriptions.Item label="任务名称">{display(detail.task_name)}</Descriptions.Item>
-        <Descriptions.Item label="任务状态"><TaskStatusTag status={detail.status} /></Descriptions.Item>
-        <Descriptions.Item label="当前步骤">{display(detail.current_step)}</Descriptions.Item>
-        <Descriptions.Item label="文件数量">{detail.pdf_count}</Descriptions.Item>
-        <Descriptions.Item label="文件大小">{formatFileSize(detail.file_size)}</Descriptions.Item>
-        <Descriptions.Item label="页数">{detail.page_count}</Descriptions.Item>
-        <Descriptions.Item label="创建时间">{formatDateTime(detail.created_at)}</Descriptions.Item>
-        <Descriptions.Item label="开始时间">{formatDateTime(detail.started_at)}</Descriptions.Item>
-        <Descriptions.Item label="完成时间">{formatDateTime(detail.completed_at)}</Descriptions.Item>
-      </Descriptions>
-      <div className={styles.progressRow}><span>处理进度</span><Progress percent={formatPercent(detail.progress)} /></div>
-    </Card>
-    <Card size="small" title="处理统计">
-      <div className={styles.counts}>
-        <span>已处理 <b>{detail.processed_count}</b></span><span>识别表格 <b>{detail.table_count}</b></span>
-        <span>标准比对 <b>{detail.standard_count}</b></span><span>完全符合 <b>{detail.exact_match_count}</b></span>
-        <span>年份不一致 <b>{detail.year_mismatch_count}</b></span><span>较为相似 <b>{detail.similar_count}</b></span><span>不存在 <b>{detail.not_found_count}</b></span>
-      </div>
-    </Card>
-    <Card size="small" title="文件列表">
-      {detail.file_names.length ? <List size="small" dataSource={detail.file_names} renderItem={(name) => <List.Item>{name}</List.Item>} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无文件信息" />}
-    </Card>
-  </Space>
+interface AnalysisRow {
+  key: string
+  source: string
+  extracted: string
+  matched: string
+  status: string
+  suggestion: string
+}
+
+const display = (value: string | number | null | undefined) => value === '' || value == null ? '—' : String(value)
+const standardColor = (status: string) => ({ 完全符合: 'success', 年份不一致: 'warning', 较为相似: 'processing', 不存在: 'error', 解析错误: 'error', 待识别: 'warning' }[status] || 'default')
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const recordText = (record: Record<string, unknown> | undefined, ...keys: string[]) => {
+  for (const key of keys) {
+    const value = record?.[key]
+    if (value != null && value !== '') return String(value)
+  }
+  return ''
+}
+
+const safeUploadFilename = (filename: string) => filename.split(/[\\/]/).pop()?.trim().replace(/[\\/:*?"<>|]+/g, '_') || 'upload.pdf'
+
+function PdfPreview({ detail }: { detail: TaskDetail }) {
+  const [fileIndex, setFileIndex] = useState(0)
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [previewError, setPreviewError] = useState('')
+  const fileName = detail.file_names[fileIndex] || detail.original_filename
+  const serverUrl = useMemo(() => {
+    if (!fileName || !detail.task_id) return ''
+    const savedName = `${String(fileIndex + 1).padStart(3, '0')}_${safeUploadFilename(fileName)}`
+    return resolveApiFileUrl(`uploads/${encodeURIComponent(detail.task_id)}/${encodeURIComponent(savedName)}`)
+  }, [detail.task_id, fileIndex, fileName])
+
+  useEffect(() => {
+    setFileIndex(0)
+  }, [detail.task_id])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let objectUrl = ''
+    setPreviewUrl('')
+    setPreviewError('')
+    if (!serverUrl) {
+      setPreviewError('未获得原始 PDF 文件信息')
+      return () => controller.abort()
+    }
+    void fetch(serverUrl, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const buffer = await response.arrayBuffer()
+        objectUrl = URL.createObjectURL(new Blob([buffer], { type: 'application/pdf' }))
+        setPreviewUrl(objectUrl)
+      })
+      .catch((reason: unknown) => {
+        if (reason instanceof DOMException && reason.name === 'AbortError') return
+        setPreviewError('原始 PDF 暂时无法预览')
+      })
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [serverUrl])
+
+  const fallbackImage = detail.annotated_images[0]
+  return <div className={styles.previewBlock}>
+    {detail.file_names.length > 1 && <Select className={styles.previewSelect} value={fileIndex} aria-label="选择原始图纸" onChange={setFileIndex}
+      options={detail.file_names.map((name, index) => ({ value: index, label: name }))} />}
+    <div className={styles.pdfFrame}>
+      {previewUrl ? <iframe title={`原始图纸预览：${fileName}`} src={`${previewUrl}#page=1&view=FitH&toolbar=0`} />
+        : previewError && fallbackImage ? <div className={styles.fallbackPreview}>
+          <Image src={resolveApiFileUrl(fallbackImage.image_url || fallbackImage.image_path)} alt="版面识别图预览" preview={false} />
+          <span>原始 PDF 暂不可用，当前显示版面识别图</span>
+        </div>
+          : previewError ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={previewError} />
+            : <div className={styles.previewLoading}><Spin size="small" /><span>正在加载原始图纸…</span></div>}
+    </div>
+    <div className={styles.previewFooter}><Typography.Text ellipsis title={fileName}>{display(fileName)}</Typography.Text>{serverUrl && <Button type="link" size="small" href={serverUrl} target="_blank">打开原始 PDF</Button>}</div>
+  </div>
+}
+
+function DrawingSummary({ detail }: { detail: TaskDetail }) {
+  const metadata = useMemo(() => readTaskSessionMetadata(detail.task_id), [detail.task_id])
+  const raw = detail.raw_json
+  const primaryFile = detail.file_names[0] || detail.original_filename
+  return <Card className={styles.summaryCard}>
+    {detail.error_message && <Alert className={styles.taskAlert} type="error" showIcon message="任务处理异常" description={detail.error_message} />}
+    <div className={styles.summaryGrid}>
+      <section aria-labelledby="drawing-preview-title">
+        <h2 id="drawing-preview-title" className={styles.sectionTitle}>图纸原始预览</h2>
+        <PdfPreview detail={detail} />
+      </section>
+      <section aria-labelledby="drawing-info-title">
+        <div className={styles.infoHeading}><h2 id="drawing-info-title" className={styles.sectionTitle}>图纸基础信息</h2><TaskStatusTag status={detail.status} /></div>
+        <Descriptions className={styles.basicInfo} column={2} size="small" colon={false}>
+          <Descriptions.Item label="任务名称">{display(metadata?.taskName || detail.task_name)}</Descriptions.Item>
+          <Descriptions.Item label="图纸名称">{display(primaryFile)}</Descriptions.Item>
+          <Descriptions.Item label="专业分类">{display(metadata?.professional || recordText(raw, 'professional', 'professional_type'))}</Descriptions.Item>
+          <Descriptions.Item label="设备分类">{display(metadata?.equipment || recordText(raw, 'equipment', 'equipment_type'))}</Descriptions.Item>
+          <Descriptions.Item label="图纸类型">{display(metadata?.drawingType || recordText(raw, 'drawing_type'))}</Descriptions.Item>
+          <Descriptions.Item label="识别任务类型">{display(metadata?.recognitionTaskType || recordText(raw, 'recognition_task_type'))}</Descriptions.Item>
+          <Descriptions.Item label="文件数量">{detail.pdf_count}</Descriptions.Item>
+          <Descriptions.Item label="页数">{detail.page_count}</Descriptions.Item>
+          <Descriptions.Item label="文件大小">{formatFileSize(detail.file_size)}</Descriptions.Item>
+          <Descriptions.Item label="完成时间">{formatDateTime(detail.completed_at)}</Descriptions.Item>
+          <Descriptions.Item label="备注说明" span={2}>{display(metadata?.remark || detail.description)}</Descriptions.Item>
+        </Descriptions>
+      </section>
+    </div>
+  </Card>
+}
+
+function ResultSummary({ active, detail }: { active: ResultView; detail: TaskDetail }) {
+  const inconsistent = detail.year_mismatch_count + detail.not_found_count
+  const manual = detail.similar_count + Math.max(0, detail.standard_count - detail.exact_match_count - inconsistent - detail.similar_count)
+  if (active === 'layout') return <div className={styles.contextLine}><b>当前标签：图纸版面识别结果</b><span>展示后端已返回的版面定位标注图，共 {detail.annotated_images.length} 张。</span></div>
+  if (active === 'content') return <div className={styles.contextLine}><b>当前标签：图纸内容解析结果</b><span>左侧为表格裁剪图，右侧 Markdown 可在本页临时编辑，共 {detail.tables.length} 项。</span></div>
+  return <div className={styles.reviewSummary}>
+    <b>{active === 'analysis' ? '标准匹配分析统计' : '审查结果统计汇总'}</b>
+    <span><i className={styles.exactDot} />审查一致 <strong>{detail.exact_match_count}</strong> 条</span>
+    <span><i className={styles.mismatchDot} />审查不一致 <strong>{inconsistent}</strong> 条</span>
+    <span><i className={styles.manualDot} />待人工审核 <strong>{manual}</strong> 条</span>
+  </div>
+}
+
+function StandardsInformation({ standards }: { standards: StandardMatch[] }) {
+  return <section className={styles.resultSection} aria-labelledby="standard-list-title">
+    <h2 id="standard-list-title" className={styles.resultTitle}>标准对比明细列表</h2>
+    <Table<StandardMatch> rowKey={(item) => `${item.pdf_name}-${item.source_table}-${item.standard_no}-${item.matched_standard}`} pagination={false} size="middle" scroll={{ x: 900 }} dataSource={standards}
+      locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无标准信息审查结果" /> }} columns={[
+        { title: '图纸提取标准信息', dataIndex: 'standard_no', width: 220, render: display },
+        { title: '标准库标准信息', dataIndex: 'matched_standard', width: 220, render: display },
+        { title: '比对差异', key: 'difference', render: (_, item) => display(item.suggestion || item.status || item.result_type) },
+        { title: '判断建议', key: 'status', width: 150, render: (_, item) => { const status = item.status || item.result_type; return <Tag color={standardColor(status)}>{display(status)}</Tag> } },
+      ]} />
+  </section>
 }
 
 function LayoutRecognition({ detail }: { detail: TaskDetail }) {
-  return detail.annotated_images.length ? <div className={styles.imageGrid}>{detail.annotated_images.map((image, index) => (
-    <Card size="small" key={`${image.image_path}-${index}`} title={`${display(image.pdf_name)} · 第 ${image.page || '—'} 页`}>
-      {image.image_url || image.image_path
-        ? <Image className={styles.previewImage} src={resolveApiFileUrl(image.image_url || image.image_path)} alt={`版面识别图 ${index + 1}`} />
-        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="图片地址缺失" />}
-    </Card>
-  ))}</div> : <Empty description="暂无版面识别图" />
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  useEffect(() => setSelectedIndex(0), [detail.annotated_images])
+  const selected = detail.annotated_images[selectedIndex]
+  if (!selected) return <div className={styles.resultEmpty}><Empty description="暂无图纸版面识别结果" /></div>
+  return <section className={styles.resultSection} aria-labelledby="layout-result-title">
+    <div className={styles.resultHeading}><h2 id="layout-result-title" className={styles.resultTitle}>图纸版面识别明细</h2>
+      <Select value={selectedIndex} className={styles.resultSelect} aria-label="选择版面识别图" onChange={setSelectedIndex} options={detail.annotated_images.map((item, index) => ({ value: index, label: `${display(item.pdf_name)} · 第 ${item.page || '—'} 页` }))} /></div>
+    <div className={styles.annotatedCanvas}><Image src={resolveApiFileUrl(selected.image_url || selected.image_path)} alt={`版面识别图 ${selectedIndex + 1}`} /></div>
+  </section>
 }
 
 function ContentRecognition({ tables }: { tables: RecognitionTable[] }) {
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const [view, setView] = useState<'image' | 'raw' | 'highlighted'>('image')
-  const table = tables[selectedIndex]
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
   useEffect(() => setSelectedIndex(0), [tables])
-  if (!tables.length) return <Empty description="暂无内容识别结果" />
-  return <Space direction="vertical" size={16} className={styles.fullWidth}>
-    <Select value={selectedIndex} className={styles.tableSelect} aria-label="选择识别表格" onChange={setSelectedIndex}
-      options={tables.map((item, index) => ({ value: index, label: `${display(item.display_name) || `表格 ${item.table_index}`} · ${display(item.pdf_name)} 第 ${item.page || '—'} 页` }))} />
-    <Radio.Group value={view} onChange={(event) => setView(event.target.value)}>
-      <Radio.Button value="image">裁剪图</Radio.Button><Radio.Button value="raw">原始 Markdown</Radio.Button><Radio.Button value="highlighted">高亮 Markdown</Radio.Button>
-    </Radio.Group>
-    <Card size="small" title={`${display(table.display_name) || `表格 ${table.table_index}`} · ${display(table.pdf_name)} 第 ${table.page || '—'} 页`}>
-      {view === 'image' ? (table.image_url || table.image_path
-        ? <Image className={styles.contentImage} src={resolveApiFileUrl(table.image_url || table.image_path)} alt="识别表格裁剪图" />
-        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="裁剪图地址缺失" />) :
-        <SafeMarkdown content={view === 'raw' ? table.raw_markdown_content || table.markdown_content : table.highlighted_markdown_content || table.markdown_content} />}
-    </Card>
-  </Space>
+  const table = tables[selectedIndex]
+  if (!table) return <div className={styles.resultEmpty}><Empty description="暂无图纸内容解析结果" /></div>
+  const draftKey = `${table.pdf_name}-${table.page}-${table.table_index}`
+  const sourceMarkdown = table.raw_markdown_content || table.markdown_content
+  const markdown = drafts[draftKey] ?? sourceMarkdown
+  return <section className={styles.resultSection} aria-labelledby="content-result-title">
+    <div className={styles.resultHeading}><h2 id="content-result-title" className={styles.resultTitle}>图纸内容解析明细</h2>
+      <Select value={selectedIndex} className={styles.resultSelect} aria-label="选择识别表格" onChange={setSelectedIndex} options={tables.map((item, index) => ({ value: index, label: `${display(item.display_name) || `表格 ${item.table_index}`} · ${display(item.pdf_name)} 第 ${item.page || '—'} 页` }))} /></div>
+    <div className={styles.contentSplit}>
+      <div className={styles.contentPane}><h3>表格图片</h3>{table.image_url || table.image_path ? <Image src={resolveApiFileUrl(table.image_url || table.image_path)} alt="识别表格裁剪图" /> : <Empty description="裁剪图地址缺失" />}</div>
+      <div className={styles.contentPane}><div className={styles.editorHeading}><h3>Markdown 解析结果</h3><Button type="link" size="small" onClick={() => setDrafts((current) => ({ ...current, [draftKey]: sourceMarkdown }))}>恢复识别结果</Button></div>
+        <Input.TextArea className={styles.markdownEditor} value={markdown} aria-label="Markdown 解析结果编辑区" onChange={(event) => setDrafts((current) => ({ ...current, [draftKey]: event.target.value }))} autoSize={{ minRows: 18, maxRows: 30 }} spellCheck={false} />
+        <Typography.Text type="secondary" className={styles.draftNote}>仅在当前页面临时编辑，不会回写服务端。</Typography.Text>
+      </div>
+    </div>
+  </section>
 }
 
-function StandardsReview({ standards }: { standards: StandardMatch[] }) {
-  const [filter, setFilter] = useState('all')
-  const statuses = useMemo(() => Array.from(new Set(standards.map((item) => item.status || item.result_type).filter(Boolean))), [standards])
-  const visible = filter === 'all' ? standards : standards.filter((item) => (item.status || item.result_type) === filter)
-  if (!standards.length) return <Empty description="暂无标准审查结果" />
-  return <Space direction="vertical" size={16} className={styles.fullWidth}>
-    <Select value={filter} className={styles.filterSelect} aria-label="按审查结果筛选" onChange={setFilter} options={[{ value: 'all', label: '全部结果' }, ...statuses.map((status) => ({ value: status, label: status }))]} />
-    {visible.length ? <List className={styles.standardsList} dataSource={visible} renderItem={(item) => <List.Item>
-      <Descriptions column={3} size="small" className={styles.fullWidth}>
-        <Descriptions.Item label="标准号">{display(item.standard_no)}</Descriptions.Item>
-        <Descriptions.Item label="匹配标准">{display(item.matched_standard)}</Descriptions.Item>
-        <Descriptions.Item label="审查结果"><Tag color={standardColor(item.status || item.result_type)}>{display(item.status || item.result_type)}</Tag></Descriptions.Item>
-        <Descriptions.Item label="来源">{display(item.source_table)}</Descriptions.Item>
-        <Descriptions.Item label="置信度">{item.confidence == null ? '—' : `${formatPercent(item.confidence <= 1 ? item.confidence * 100 : item.confidence)}%`}</Descriptions.Item>
-        <Descriptions.Item label="建议">{display(item.suggestion)}</Descriptions.Item>
-      </Descriptions>
-    </List.Item>} /> : <Empty description="当前筛选下暂无结果" />}
-  </Space>
+function toAnalysisRows(detail: TaskDetail): AnalysisRow[] {
+  const rawResults = Array.isArray(detail.overall_standard_compare.results) ? detail.overall_standard_compare.results : []
+  if (rawResults.length) return rawResults.map((item, index) => {
+    const row = isRecord(item) ? item : {}
+    const extracted = isRecord(row.extracted) ? row.extracted : undefined
+    const matched = isRecord(row.matched_library_entry) ? row.matched_library_entry : undefined
+    return {
+      key: `overall-${index}`,
+      source: recordText(row, 'pdf_name', 'source_table') || '全部图纸',
+      extracted: recordText(extracted, 'original') || recordText(row, 'standard_no', 'original_text'),
+      matched: recordText(matched, 'original') || recordText(row, 'matched_standard', 'matched_standard_no') || '未匹配',
+      status: recordText(row, 'status', 'result_type', 'match_status'),
+      suggestion: recordText(row, 'message', 'suggestion'),
+    }
+  })
+  return detail.standards.map((item, index) => ({ key: `standard-${index}`, source: item.pdf_name || item.source_table, extracted: item.standard_no, matched: item.matched_standard, status: item.status || item.result_type, suggestion: item.suggestion }))
 }
+
+function StandardAnalysis({ detail }: { detail: TaskDetail }) {
+  const rows = useMemo(() => toAnalysisRows(detail), [detail])
+  return <section className={styles.resultSection} aria-labelledby="analysis-result-title">
+    <h2 id="analysis-result-title" className={styles.resultTitle}>标准匹配分析明细</h2>
+    <Table<AnalysisRow> rowKey="key" pagination={false} size="middle" scroll={{ x: 980 }} dataSource={rows} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无标准匹配分析结果" /> }} columns={[
+      { title: '图纸来源', dataIndex: 'source', width: 180, render: display },
+      { title: '图纸识别结果', dataIndex: 'extracted', width: 210, render: display },
+      { title: 'GB 标准识别结果', dataIndex: 'matched', width: 220, render: display },
+      { title: '比对结果', dataIndex: 'status', width: 140, render: (status: string) => <Tag color={standardColor(status)}>{display(status)}</Tag> },
+      { title: '判定建议', dataIndex: 'suggestion', render: display },
+    ]} />
+  </section>
+}
+
+function ResultPanel({ active, detail }: { active: ResultView; detail: TaskDetail }) {
+  if (active === 'layout') return <LayoutRecognition detail={detail} />
+  if (active === 'content') return <ContentRecognition tables={detail.tables} />
+  if (active === 'analysis') return <StandardAnalysis detail={detail} />
+  return <StandardsInformation standards={detail.standards} />
+}
+
+const tabItems = [
+  { key: 'standard-info', label: '图纸标准信息审查', children: null },
+  { key: 'layout', label: '图纸版面识别结果', children: null },
+  { key: 'content', label: '图纸内容解析结果', children: null },
+  { key: 'analysis', label: '标准匹配分析结果', children: null },
+]
 
 export function TaskDetailPage() {
   const { taskId = '' } = useParams()
@@ -99,6 +234,7 @@ export function TaskDetailPage() {
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [active, setActive] = useState<ResultView>('standard-info')
   const load = useCallback(async () => {
     if (!taskId) { setError('任务编号缺失'); setLoading(false); return }
     setLoading(true); setError('')
@@ -110,20 +246,20 @@ export function TaskDetailPage() {
     } finally { setLoading(false) }
   }, [notificationApi, taskId])
   useEffect(() => { void load() }, [load])
-  const tabItems = detail ? [
-    { key: 'overview', label: '任务概览', children: <Overview detail={detail} /> },
-    { key: 'layout', label: '版面识别', children: <LayoutRecognition detail={detail} /> },
-    { key: 'content', label: '内容识别', children: <ContentRecognition tables={detail.tables} /> },
-    { key: 'standards', label: '标准审查', children: <StandardsReview standards={detail.standards} /> },
-  ] : [
-    { key: 'overview', label: '任务概览', children: loading ? <div className={styles.state}><Spin /><div className="muted-text">正在加载任务详情…</div></div> : <Empty description={error ? '任务数据暂不可用' : '未找到任务详情'} image={Empty.PRESENTED_IMAGE_SIMPLE}>{error && <Button size="small" onClick={() => void load()}>重新加载</Button>}</Empty> },
-    { key: 'layout', label: '版面识别', children: <Empty description="暂无版面识别数据" image={Empty.PRESENTED_IMAGE_SIMPLE} /> },
-    { key: 'content', label: '内容识别', children: <Empty description="暂无内容识别数据" image={Empty.PRESENTED_IMAGE_SIMPLE} /> },
-    { key: 'standards', label: '标准审查', children: <Empty description="暂无标准审查数据" image={Empty.PRESENTED_IMAGE_SIMPLE} /> },
-  ]
+
   return <main className="page-container">
     {notificationContext}
     <div className="page-header"><div><h1 className="page-title">任务详情</h1><p className="page-description">{detail?.task_id || taskId || '—'}</p></div>{detail && <TaskStatusTag status={detail.status} />}</div>
-    <Tabs items={tabItems} />
+    {detail ? <Space direction="vertical" size={16} className={styles.fullWidth}>
+      <DrawingSummary detail={detail} />
+      <Card className={styles.tabCard}>
+        <Tabs className={styles.resultTabs} activeKey={active} onChange={(key) => setActive(key as ResultView)} items={tabItems} />
+        <ResultSummary active={active} detail={detail} />
+      </Card>
+      <Card className={styles.resultCard}><ResultPanel active={active} detail={detail} /></Card>
+    </Space> : <Space direction="vertical" size={16} className={styles.fullWidth}>
+      <Card className={styles.tabCard}><Tabs className={styles.resultTabs} activeKey={active} onChange={(key) => setActive(key as ResultView)} items={tabItems} /></Card>
+      <Card className={styles.resultCard}>{loading ? <div className={styles.state}><Spin /><span>正在加载任务详情…</span></div> : <Empty description={error ? '任务数据暂不可用' : '未找到任务详情'} image={Empty.PRESENTED_IMAGE_SIMPLE}>{error && <Button size="small" onClick={() => void load()}>重新加载</Button>}</Empty>}</Card>
+    </Space>}
   </main>
 }

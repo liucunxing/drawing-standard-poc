@@ -1,0 +1,22 @@
+- generic [ref=f1e4]:
+  - complementary [ref=f1e5]:
+    - generic [ref=f1e6]:
+      - generic "图纸标准审查" [ref=f1e7]: 审
+      - menu [ref=f1e10]:
+        - menuitem "appstore 工作台" [ref=f1e11] [cursor=pointer]:
+          - img "appstore" [ref=f1e12]
+          - generic [ref=f1e15]: 工作台
+        - menuitem "file-add 新建审查" [ref=f1e16] [cursor=pointer]:
+          - img "file-add" [ref=f1e17]
+          - generic [ref=f1e20]: 新建审查
+        - menuitem "unordered-list 任务中心" [ref=f1e21] [cursor=pointer]:
+          - img "unordered-list" [ref=f1e22]
+          - generic [ref=f1e25]: 任务中心
+        - menuitem "book 标准库" [ref=f1e26] [cursor=pointer]:
+          - img "book" [ref=f1e27]
+          - generic [ref=f1e30]: 标准库
+  - generic [ref=f1e31]:
+    - banner [ref=f1e32]:
+      - generic [ref=f1e33]: 工程图纸识别与标准审查
+    - main [ref=f1e34]:
+      - generic [ref=f1e35]: 正在加载页面…

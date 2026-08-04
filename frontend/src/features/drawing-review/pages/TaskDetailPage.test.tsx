@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TaskDetailPage } from './TaskDetailPage'
@@ -40,14 +40,34 @@ describe('TaskDetailPage', () => {
     drawingApi.getTaskDetail.mockResolvedValue(detail)
   })
 
-  it('loads the fixed four tabs and real task fields', async () => {
+  it('loads the requested four result tabs and real task fields', async () => {
     renderPage()
     expect(await screen.findByText('装置图纸审查')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '任务概览' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '版面识别' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '内容识别' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '标准审查' })).toBeInTheDocument()
-    expect(screen.getByText('处理完成')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '图纸原始预览' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '图纸基础信息' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '图纸标准信息审查' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '图纸版面识别结果' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '图纸内容解析结果' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '标准匹配分析结果' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '标准对比明细列表' })).toBeInTheDocument()
+  })
+
+  it('switches result panels and keeps Markdown edits on the page', async () => {
+    renderPage()
+    await screen.findByText('装置图纸审查')
+
+    fireEvent.click(screen.getByRole('tab', { name: '图纸版面识别结果' }))
+    expect(screen.getByRole('heading', { name: '图纸版面识别明细' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '图纸内容解析结果' }))
+    const editor = screen.getByRole('textbox', { name: 'Markdown 解析结果编辑区' })
+    expect(editor).toHaveValue('| A |')
+    fireEvent.change(editor, { target: { value: '| 已编辑 |' } })
+    expect(editor).toHaveValue('| 已编辑 |')
+    expect(screen.getByText('仅在当前页面临时编辑，不会回写服务端。')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '标准匹配分析结果' }))
+    expect(screen.getByRole('heading', { name: '标准匹配分析明细' })).toBeInTheDocument()
   })
 
   it('keeps the four-tab framework visible when detail loading fails', async () => {
@@ -57,10 +77,10 @@ describe('TaskDetailPage', () => {
 
     expect(await screen.findByText('数据加载失败')).toBeInTheDocument()
     expect(screen.getByText('任务接口不可用')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '任务概览' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '版面识别' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '内容识别' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '标准审查' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '图纸标准信息审查' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '图纸版面识别结果' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '图纸内容解析结果' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '标准匹配分析结果' })).toBeInTheDocument()
     expect(screen.getByText('任务数据暂不可用')).toBeInTheDocument()
   })
 })

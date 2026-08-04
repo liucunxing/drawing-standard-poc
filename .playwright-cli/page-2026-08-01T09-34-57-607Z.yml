@@ -1,0 +1,69 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e4]:
+    - complementary [ref=f3e5]:
+      - generic [ref=f3e6]:
+        - generic "图纸标准审查" [ref=f3e7]: 审
+        - menu [ref=f3e10]:
+          - menuitem "appstore 工作台" [ref=f3e11] [cursor=pointer]:
+            - img "appstore" [ref=f3e12]
+            - generic [ref=f3e15]: 工作台
+          - menuitem "file-add 新建审查" [ref=f3e16] [cursor=pointer]:
+            - img "file-add" [ref=f3e17]
+            - generic [ref=f3e20]: 新建审查
+          - menuitem "unordered-list 任务中心" [ref=f3e21] [cursor=pointer]:
+            - img "unordered-list" [ref=f3e22]
+            - generic [ref=f3e25]: 任务中心
+          - menuitem "book 标准库" [ref=f3e26] [cursor=pointer]:
+            - img "book" [ref=f3e27]
+            - generic [ref=f3e30]: 标准库
+    - generic [ref=f3e31]:
+      - banner [ref=f3e32]:
+        - generic [ref=f3e33]: 工程图纸识别与标准审查
+      - main [ref=f3e34]:
+        - main [ref=f3e249]:
+          - generic [ref=f3e250]:
+            - generic [ref=f3e251]:
+              - heading "工作台" [level=1] [ref=f3e252]
+              - paragraph [ref=f3e253]: 查看近期图纸审查任务及处理状态。
+            - button "plus 新建审查" [ref=f3e254] [cursor=pointer]:
+              - img "plus" [ref=f3e256]
+              - generic [ref=f3e260]: 新建审查
+          - region "近期任务统计" [ref=f3e261]:
+            - generic [ref=f3e263]:
+              - generic [ref=f3e264]: 近期任务
+              - generic [ref=f3e265]: "0"
+            - generic [ref=f3e267]:
+              - generic [ref=f3e268]: 处理中
+              - generic [ref=f3e269]: "0"
+            - generic [ref=f3e271]:
+              - generic [ref=f3e272]: 已完成
+              - generic [ref=f3e273]: "0"
+            - generic [ref=f3e275]:
+              - generic [ref=f3e276]: 异常
+              - generic [ref=f3e277]: "0"
+          - generic [ref=f3e278]:
+            - generic [ref=f3e279]: 最近任务
+            - table [ref=f3e289]:
+              - rowgroup [ref=f3e296]:
+                - row [ref=f3e297]:
+                  - columnheader "任务名称" [ref=f3e298]
+                  - columnheader "文件数" [ref=f3e299]
+                  - columnheader "状态" [ref=f3e300]
+                  - columnheader "当前进度" [ref=f3e301]
+                  - columnheader "更新时间" [ref=f3e302]
+              - rowgroup [ref=f3e303]:
+                - row [ref=f3e304]:
+                  - cell "暂无数据 近期任务数据暂不可用 reload 重新加载" [ref=f3e305]:
+                    - generic [ref=f3e307]:
+                      - img "暂无数据" [ref=f3e309]
+                      - generic [ref=f3e315]: 近期任务数据暂不可用
+                      - button "reload 重新加载" [ref=f3e317] [cursor=pointer]:
+                        - img "reload" [ref=f3e319]
+                        - generic [ref=f3e322]: 重新加载
+  - generic [ref=f3e324]:
+    - alert [ref=f3e326]:
+      - img "close-circle" [ref=f3e327]
+      - generic [ref=f3e330]: 数据加载失败
+      - generic [ref=f3e331]: Request failed with status code 404
+    - generic "Close" [ref=f3e332] [cursor=pointer]:
+      - img "close" [ref=f3e333]

@@ -6,6 +6,7 @@ import { useBeforeUnload, useBlocker, useNavigate } from 'react-router-dom'
 import { formatFileSize } from '../../../shared/format'
 import { useUploadStore } from '../store/uploadStore'
 import { composeDescription, type NewReviewFormValues, validateTaskName } from './newReviewForm'
+import { saveTaskSessionMetadata } from '../taskMetadata'
 import styles from './NewReviewPage.module.css'
 
 const running = (status: string) => status === 'uploading' || status === 'processing'
@@ -55,6 +56,14 @@ export function NewReviewPage() {
     }
     const completedTaskId = await run(values.taskName.trim(), composeDescription(values))
     if (completedTaskId) {
+      saveTaskSessionMetadata(completedTaskId, {
+        taskName: values.taskName.trim(),
+        remark: values.remark?.trim() || '',
+        professional: values.professional,
+        equipment: values.equipment,
+        drawingType: values.drawingType,
+        recognitionTaskType: values.recognitionTaskType,
+      })
       messageApi.success('全部 PDF 已处理完成')
       clearFiles()
       resetRun()
