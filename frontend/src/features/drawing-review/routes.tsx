@@ -1,18 +1,51 @@
-import { lazy, Suspense, type ReactNode } from 'react'
+import { lazy, Suspense } from 'react'
 import type { RouteObject } from 'react-router-dom'
 
-const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })))
-const NewReviewPage = lazy(() => import('./pages/NewReviewPage').then((module) => ({ default: module.NewReviewPage })))
-const StandardsPage = lazy(() => import('./pages/StandardsPage').then((module) => ({ default: module.StandardsPage })))
-const TaskCenterPage = lazy(() => import('./pages/TaskCenterPage').then((module) => ({ default: module.TaskCenterPage })))
-const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage').then((module) => ({ default: module.TaskDetailPage })))
-
-const load = (element: ReactNode) => <Suspense fallback={<div className="route-loading">正在加载页面…</div>}>{element}</Suspense>
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })))
+const NewReviewPage = lazy(() => import('./pages/NewReviewPage').then((m) => ({ default: m.NewReviewPage })))
+const StandardsPage = lazy(() => import('./pages/StandardsPage').then((m) => ({ default: m.StandardsPage })))
+const TaskCenterPage = lazy(() => import('./pages/TaskCenterPage').then((m) => ({ default: m.TaskCenterPage })))
+const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage').then((m) => ({ default: m.TaskDetailPage })))
 
 export const drawingReviewRoutes: RouteObject[] = [
-  { path: 'dashboard', element: load(<DashboardPage />) },
-  { path: 'tasks/new', element: load(<NewReviewPage />) },
-  { path: 'tasks', element: load(<TaskCenterPage />) },
-  { path: 'tasks/:taskId', element: load(<TaskDetailPage />) },
-  { path: 'standards', element: load(<StandardsPage />) },
+  { 
+    path: 'dashboard', 
+    element: (
+      <Suspense fallback={<div className="route-loading">正在加载页面…</div>}>
+        <DashboardPage />
+      </Suspense>
+    ) 
+  },
+  { 
+    path: 'tasks/new', 
+    element: (
+      <Suspense fallback={<div className="route-loading">正在加载页面…</div>}>
+        <NewReviewPage />
+      </Suspense>
+    ) 
+  },
+  { 
+    path: 'tasks', 
+    element: (
+      <Suspense fallback={<div className="route-loading">正在加载页面…</div>}>
+        <TaskCenterPage />
+      </Suspense>
+    ) 
+  },
+  { 
+    path: 'tasks/:taskId', 
+    element: (
+      <Suspense fallback={<div className="route-loading">正在加载页面…</div>}>
+        <TaskDetailPage />
+      </Suspense>
+    ) 
+  },
+  { 
+    path: 'standards', 
+    element: (
+      <Suspense fallback={<div className="route-loading">正在加载页面…</div>}>
+        <StandardsPage />
+      </Suspense>
+    ) 
+  },
 ]
