@@ -1,7 +1,8 @@
-import { Alert, Button, Card, Descriptions, Empty, Image, Input, Select, Space, Spin, Table, Tabs, Tag, Typography, notification } from 'antd'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Button, Card, Descriptions, Empty, Image, Select, Space, Spin, Table, Tabs, Tag, Typography, notification } from 'antd'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { getTaskDetail } from '../api/drawingApi'
+import { renderSafeMarkdown } from '../components/markdownRenderer'
 import type { RecognitionTable, StandardMatch, TaskDetail } from '../types'
 import { readTaskSessionMetadata } from '../taskMetadata'
 import { resolveApiFileUrl } from '../../../shared/api/client'
@@ -160,9 +161,58 @@ function LayoutRecognition({ detail }: { detail: TaskDetail }) {
   </section>
 }
 
-function ContentRecognition({ tables }: { tables: RecognitionTable[] }) {
+interface VisualMarkdownEditorProps {
+  value: string
+  onChange: (value: string) => void
+}
+
+function insertPlainText(text: string) {
+  const selection = window.getSelection()
+  if (!selection?.rangeCount) return
+  const range = selection.getRangeAt(0)
+  range.deleteContents()
+  const lines = text.split(/\r?\n/)
+  const fragment = document.createDocumentFragment()
+  lines.forEach((line, index) => {
+    if (index > 0) fragment.append(document.createElement('br'))
+    fragment.append(document.createTextNode(line))
+  })
+  const lastNode = fragment.lastChild
+  range.insertNode(fragment)
+  if (lastNode) range.setStartAfter(lastNode)
+  range.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
+function VisualMarkdownEditor({ value, onChange }: VisualMarkdownEditorProps) {
+  return <div
+    className={styles.markdownVisualEditor}
+    role="textbox"
+    aria-label="Markdown 解析结果编辑区"
+    aria-multiline="true"
+    contentEditable
+    suppressContentEditableWarning
+    spellCheck={false}
+    dangerouslySetInnerHTML={{ __html: renderSafeMarkdown(value) }}
+    onInput={(event) => onChange(event.currentTarget.innerHTML)}
+    onBlur={(event) => onChange(renderSafeMarkdown(event.currentTarget.innerHTML))}
+    onPaste={(event) => {
+      event.preventDefault()
+      insertPlainText(event.clipboardData.getData('text/plain'))
+    }}
+  />
+}
+
+interface ContentRecognitionProps {
+  tables: RecognitionTable[]
+  drafts: Record<string, string>
+  onDraftChange: (key: string, value: string) => void
+}
+
+function ContentRecognition({ tables, drafts, onDraftChange }: ContentRecognitionProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [editorRevision, setEditorRevision] = useState(0)
   useEffect(() => setSelectedIndex(0), [tables])
   const table = tables[selectedIndex]
   if (!table) return <div className={styles.resultEmpty}><Empty description="暂无图纸内容解析结果" /></div>
@@ -174,9 +224,9 @@ function ContentRecognition({ tables }: { tables: RecognitionTable[] }) {
       <Select value={selectedIndex} className={styles.resultSelect} aria-label="选择识别表格" onChange={setSelectedIndex} options={tables.map((item, index) => ({ value: index, label: `${display(item.display_name) || `表格 ${item.table_index}`} · ${display(item.pdf_name)} 第 ${item.page || '—'} 页` }))} /></div>
     <div className={styles.contentSplit}>
       <div className={styles.contentPane}><h3>表格图片</h3>{table.image_url || table.image_path ? <Image src={resolveApiFileUrl(table.image_url || table.image_path)} alt="识别表格裁剪图" /> : <Empty description="裁剪图地址缺失" />}</div>
-      <div className={styles.contentPane}><div className={styles.editorHeading}><h3>Markdown 解析结果</h3><Button type="link" size="small" onClick={() => setDrafts((current) => ({ ...current, [draftKey]: sourceMarkdown }))}>恢复识别结果</Button></div>
-        <Input.TextArea className={styles.markdownEditor} value={markdown} aria-label="Markdown 解析结果编辑区" onChange={(event) => setDrafts((current) => ({ ...current, [draftKey]: event.target.value }))} autoSize={{ minRows: 18, maxRows: 30 }} spellCheck={false} />
-        <Typography.Text type="secondary" className={styles.draftNote}>仅在当前页面临时编辑，不会回写服务端。</Typography.Text>
+      <div className={styles.contentPane}><div className={styles.editorHeading}><h3>Markdown 解析结果（可编辑）</h3><Button type="link" size="small" onClick={() => { onDraftChange(draftKey, sourceMarkdown); setEditorRevision((current) => current + 1) }}>恢复识别结果</Button></div>
+        <VisualMarkdownEditor key={`${draftKey}-${editorRevision}`} value={markdown} onChange={(value) => onDraftChange(draftKey, value)} />
+        <Typography.Text type="secondary" className={styles.draftNote}>可直接点击表格单元格或文字修改；编辑仅保留在当前页面，不会回写服务端。</Typography.Text>
       </div>
     </div>
   </section>
@@ -214,9 +264,16 @@ function StandardAnalysis({ detail }: { detail: TaskDetail }) {
   </section>
 }
 
-function ResultPanel({ active, detail }: { active: ResultView; detail: TaskDetail }) {
+interface ResultPanelProps {
+  active: ResultView
+  detail: TaskDetail
+  contentDrafts: Record<string, string>
+  onContentDraftChange: (key: string, value: string) => void
+}
+
+function ResultPanel({ active, detail, contentDrafts, onContentDraftChange }: ResultPanelProps) {
   if (active === 'layout') return <LayoutRecognition detail={detail} />
-  if (active === 'content') return <ContentRecognition tables={detail.tables} />
+  if (active === 'content') return <ContentRecognition tables={detail.tables} drafts={contentDrafts} onDraftChange={onContentDraftChange} />
   if (active === 'analysis') return <StandardAnalysis detail={detail} />
   return <StandardsInformation standards={detail.standards} />
 }
@@ -235,6 +292,11 @@ export function TaskDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [active, setActive] = useState<ResultView>('standard-info')
+  const contentDrafts = useRef<Record<string, string>>({})
+  useEffect(() => { contentDrafts.current = {} }, [taskId])
+  const updateContentDraft = useCallback((key: string, value: string) => {
+    contentDrafts.current[key] = value
+  }, [])
   const load = useCallback(async () => {
     if (!taskId) { setError('任务编号缺失'); setLoading(false); return }
     setLoading(true); setError('')
@@ -256,7 +318,7 @@ export function TaskDetailPage() {
         <Tabs className={styles.resultTabs} activeKey={active} onChange={(key) => setActive(key as ResultView)} items={tabItems} />
         <ResultSummary active={active} detail={detail} />
       </Card>
-      <Card className={styles.resultCard}><ResultPanel active={active} detail={detail} /></Card>
+      <Card className={styles.resultCard}><ResultPanel active={active} detail={detail} contentDrafts={contentDrafts.current} onContentDraftChange={updateContentDraft} /></Card>
     </Space> : <Space direction="vertical" size={16} className={styles.fullWidth}>
       <Card className={styles.tabCard}><Tabs className={styles.resultTabs} activeKey={active} onChange={(key) => setActive(key as ResultView)} items={tabItems} /></Card>
       <Card className={styles.resultCard}>{loading ? <div className={styles.state}><Spin /><span>正在加载任务详情…</span></div> : <Empty description={error ? '任务数据暂不可用' : '未找到任务详情'} image={Empty.PRESENTED_IMAGE_SIMPLE}>{error && <Button size="small" onClick={() => void load()}>重新加载</Button>}</Empty>}</Card>

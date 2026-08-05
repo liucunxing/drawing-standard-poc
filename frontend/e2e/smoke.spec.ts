@@ -85,14 +85,14 @@ test('task center submits filters explicitly and keeps pagination controls avail
   await expect(page.getByRole('button', { name: '泵房图纸识别' })).toBeVisible()
 })
 
-test('task detail exposes the three-layer result workspace and editable Markdown', async ({ page }) => {
+test('task detail exposes the three-layer result workspace and editable Markdown', async ({ page }, testInfo) => {
   const detail = {
     task_id: 'task-demo', task_name: '换热器装配图审查', original_filename: '25.918-1 A1.pdf', file_names: ['25.918-1 A1.pdf'], pdf_count: 1,
     file_size: 624845, page_count: 1, status: 2, progress: 100, current_step: '标准检测完成', processed_count: 1, table_count: 1, standard_count: 3,
     exact_match_count: 1, year_mismatch_count: 1, similar_count: 1, not_found_count: 0, error_message: '', created_at: '2026-08-04 17:50:56',
     updated_at: '2026-08-04 18:02:38', started_at: '2026-08-04 17:50:56', completed_at: '2026-08-04 18:02:38', description: '', pdfs: [],
     annotated_images: [{ pdf_name: '25.918-1 A1.pdf', page: 1, image_url: '/api/files/mock-layout.png', image_path: '' }],
-    tables: [{ pdf_name: '25.918-1 A1.pdf', page: 1, table_index: 1, display_name: '材料表', image_url: '/api/files/mock-table.png', image_path: '', raw_markdown_content: '| 标准号 | 名称 |\n| --- | --- |\n| GB 50053-2013 | 配电设计规范 |', markdown_content: '', highlighted_markdown_content: '' }],
+    tables: [{ pdf_name: '25.918-1 A1.pdf', page: 1, table_index: 1, display_name: '材料表', image_url: '/api/files/mock-table.png', image_path: '', raw_markdown_content: '<table><thead><tr><th>序号</th><th>标准号</th><th>名称</th></tr></thead><tbody><tr><td>1</td><td>GB 50053-2013</td><td>配电设计规范</td></tr><tr><td>2</td><td>HG/T 20570</td><td>工艺系统工程设计</td></tr></tbody></table>', markdown_content: '', highlighted_markdown_content: '' }],
     standards: [
       { pdf_name: '25.918-1 A1.pdf', standard_no: 'GB 50053-2013', matched_standard: 'GB 50053-2013', status: '完全符合', result_type: '完全符合', source_table: '材料表', confidence: 98, suggestion: '标准号、名称与发布年份一致' },
       { pdf_name: '25.918-1 A1.pdf', standard_no: 'GB 2000-2010', matched_standard: 'GB 2000-2015', status: '年份不一致', result_type: '年份不一致', source_table: '材料表', confidence: 90, suggestion: '请按现行版本复核' },
@@ -112,9 +112,11 @@ test('task detail exposes the three-layer result workspace and editable Markdown
   await expect(page.getByRole('heading', { name: '图纸版面识别明细' })).toBeVisible()
   await page.getByRole('tab', { name: '图纸内容解析结果' }).click()
   const editor = page.getByRole('textbox', { name: 'Markdown 解析结果编辑区' })
+  await expect(editor.getByRole('table')).toBeVisible()
   await expect(editor).toContainText('GB 50053-2013')
-  await editor.fill('| 已人工修订 |')
-  await expect(editor).toHaveValue('| 已人工修订 |')
+  await page.screenshot({ path: `output/playwright/markdown-editor-${pathPrefix ? 'drawing-review' : 'standalone'}-${testInfo.project.name}.png`, fullPage: true })
+  await editor.fill('已人工修订')
+  await expect(editor).toContainText('已人工修订')
   await page.getByRole('tab', { name: '标准匹配分析结果' }).click()
   await expect(page.getByRole('heading', { name: '标准匹配分析明细' })).toBeVisible()
 })

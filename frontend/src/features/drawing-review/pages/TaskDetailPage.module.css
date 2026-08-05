@@ -56,7 +56,29 @@
 .contentPane :global(img) { width: 100%; max-height: 640px; object-fit: contain; background: #f7f8fa; }
 .editorHeading { display: flex; align-items: center; justify-content: space-between; }
 .editorHeading h3 { margin-bottom: 14px; }
-.markdownEditor { width: 100%; resize: vertical; font-family: Consolas, 'Courier New', monospace; font-size: 13px; line-height: 1.65; background: #fbfcfe; }
+.markdownVisualEditor {
+  min-height: 420px;
+  max-height: 640px;
+  padding: 14px;
+  overflow: auto;
+  color: #253044;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  background: #fff;
+  border: 1px solid #d9dee7;
+  border-radius: 4px;
+  outline: none;
+}
+.markdownVisualEditor:hover { border-color: #8cb4e5; }
+.markdownVisualEditor:focus { border-color: #2f7edb; box-shadow: 0 0 0 2px rgba(47, 126, 219, .12); }
+.markdownVisualEditor :global(p) { margin: 0 0 12px; }
+.markdownVisualEditor :global(pre) { margin: 0; padding: 12px; overflow: auto; background: #f8fafc; border: 1px solid #e4e7ec; border-radius: 4px; }
+.markdownVisualEditor :global(code) { font-family: Consolas, 'Courier New', monospace; }
+.markdownVisualEditor :global(table) { width: max-content; min-width: 100%; border-collapse: collapse; background: #fff; }
+.markdownVisualEditor :global(th),
+.markdownVisualEditor :global(td) { min-width: 76px; padding: 8px 10px; border: 1px solid #c9d0da; text-align: left; vertical-align: top; }
+.markdownVisualEditor :global(th) { background: #f2f4f7; color: #253044; font-weight: 600; }
+.markdownVisualEditor :global(mark) { padding: 1px 3px; color: #613400; background: #ffe58f; }
 .draftNote { display: block; margin-top: 8px; }
 
 @media (max-width: 1100px) {

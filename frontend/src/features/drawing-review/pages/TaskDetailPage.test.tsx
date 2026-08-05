@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TaskDetailPage } from './TaskDetailPage'
@@ -26,7 +26,7 @@ const detail = {
     year_mismatch_count: 0, similar_count: 0, not_found_count: 0, error_message: '', created_at: null, updated_at: null,
     started_at: null, completed_at: null, description: '', processed_count: 1, pdfs: [],
     annotated_images: [{ pdf_name: 'A.pdf', page: 1, image_path: 'tasks/a.png', image_url: '' }],
-    tables: [{ pdf_name: 'A.pdf', page: 1, table_index: 1, display_name: '材料表', image_path: 'tasks/table.png', image_url: '', raw_markdown_content: '| A |', markdown_content: '| A |', highlighted_markdown_content: '<mark>A</mark>' }],
+    tables: [{ pdf_name: 'A.pdf', page: 1, table_index: 1, display_name: '材料表', image_path: 'tasks/table.png', image_url: '', raw_markdown_content: '<table><tbody><tr><td>序号</td><td>规格</td></tr><tr><td>1</td><td>DN80</td></tr></tbody></table>', markdown_content: '', highlighted_markdown_content: '<mark>DN80</mark>' }],
     standards: [{ pdf_name: 'A.pdf', standard_no: 'GB 1', matched_standard: 'GB 1-2024', status: '完全符合', result_type: '完全符合', source_table: '材料表', confidence: 98, suggestion: '无需修改' }], overall_standard_compare: {},
 }
 
@@ -52,7 +52,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByRole('heading', { name: '标准对比明细列表' })).toBeInTheDocument()
   })
 
-  it('switches result panels and keeps Markdown edits on the page', async () => {
+  it('renders Markdown as an editable visual table and keeps edits while switching tabs', async () => {
     renderPage()
     await screen.findByText('装置图纸审查')
 
@@ -61,13 +61,22 @@ describe('TaskDetailPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '图纸内容解析结果' }))
     const editor = screen.getByRole('textbox', { name: 'Markdown 解析结果编辑区' })
-    expect(editor).toHaveValue('| A |')
-    fireEvent.change(editor, { target: { value: '| 已编辑 |' } })
-    expect(editor).toHaveValue('| 已编辑 |')
-    expect(screen.getByText('仅在当前页面临时编辑，不会回写服务端。')).toBeInTheDocument()
+    expect(editor).toHaveAttribute('contenteditable', 'true')
+    expect(within(editor).getByRole('table')).toBeInTheDocument()
+    expect(within(editor).getByText('DN80')).toBeInTheDocument()
+    expect(editor).not.toHaveTextContent('<table>')
+    editor.innerHTML = '<table><tbody><tr><td>已编辑</td></tr></tbody></table>'
+    fireEvent.input(editor)
+    expect(within(editor).getByText('已编辑')).toBeInTheDocument()
+    expect(screen.getByText('可直接点击表格单元格或文字修改；编辑仅保留在当前页面，不会回写服务端。')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: '标准匹配分析结果' }))
     expect(screen.getByRole('heading', { name: '标准匹配分析明细' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '图纸内容解析结果' }))
+    expect(within(screen.getByRole('textbox', { name: 'Markdown 解析结果编辑区' })).getByText('已编辑')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '恢复识别结果' }))
+    expect(within(screen.getByRole('textbox', { name: 'Markdown 解析结果编辑区' })).getByText('DN80')).toBeInTheDocument()
   })
 
   it('keeps the four-tab framework visible when detail loading fails', async () => {
