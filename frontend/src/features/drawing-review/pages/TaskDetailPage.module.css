@@ -79,6 +79,7 @@
 .markdownVisualEditor :global(td) { min-width: 76px; padding: 8px 10px; border: 1px solid #c9d0da; text-align: left; vertical-align: top; }
 .markdownVisualEditor :global(th) { background: #f2f4f7; color: #253044; font-weight: 600; }
 .markdownVisualEditor :global(mark) { padding: 1px 3px; color: #613400; background: #ffe58f; }
+.markdownLoadState { min-height: 420px; display: flex; align-items: center; justify-content: center; gap: 8px; color: #667085; border: 1px solid #d9dee7; border-radius: 4px; background: #fff; }
 .draftNote { display: block; margin-top: 8px; }
 
 @media (max-width: 1100px) {

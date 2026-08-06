@@ -92,7 +92,7 @@ test('task detail exposes the three-layer result workspace and editable Markdown
     exact_match_count: 1, year_mismatch_count: 1, similar_count: 1, not_found_count: 0, error_message: '', created_at: '2026-08-04 17:50:56',
     updated_at: '2026-08-04 18:02:38', started_at: '2026-08-04 17:50:56', completed_at: '2026-08-04 18:02:38', description: '', pdfs: [],
     annotated_images: [{ pdf_name: '25.918-1 A1.pdf', page: 1, image_url: '/api/files/mock-layout.png', image_path: '' }],
-    tables: [{ pdf_name: '25.918-1 A1.pdf', page: 1, table_index: 1, display_name: '材料表', image_url: '/api/files/mock-table.png', image_path: '', raw_markdown_content: '<table><thead><tr><th>序号</th><th>标准号</th><th>名称</th></tr></thead><tbody><tr><td>1</td><td>GB 50053-2013</td><td>配电设计规范</td></tr><tr><td>2</td><td>HG/T 20570</td><td>工艺系统工程设计</td></tr></tbody></table>', markdown_content: '', highlighted_markdown_content: '' }],
+    tables: [{ pdf_name: '25.918-1 A1.pdf', page: 1, table_index: 1, display_name: '管口表', image_url: '/api/files/mock-table.png', image_path: '', raw_markdown_content: '  \n', md_content: '<table><tr><td rowspan=1 colspan=15>管 口 表</td></tr><tr><td rowspan=1 colspan=2>符号</td><td>公称压力PN</td><td>公称尺寸DN</td><td colspan=2>法兰标准</td><td colspan=2>法兰类型代号</td><td>密封面型式</td><td colspan=3>用途</td><td colspan=2>接管外伸长度</td><td>接管规格</td></tr><tr><td colspan=2>N1</td><td>16</td><td>100(B)</td><td colspan=2>HG/T20592-2009</td><td colspan=2>WN</td><td>RF</td><td colspan=3>蒸汽气入口</td><td colspan=2>400</td><td>φ108×10</td></tr></table>', markdown_content: '', highlighted_markdown_content: '' }],
     standards: [
       { pdf_name: '25.918-1 A1.pdf', standard_no: 'GB 50053-2013', matched_standard: 'GB 50053-2013', status: '完全符合', result_type: '完全符合', source_table: '材料表', confidence: 98, suggestion: '标准号、名称与发布年份一致' },
       { pdf_name: '25.918-1 A1.pdf', standard_no: 'GB 2000-2010', matched_standard: 'GB 2000-2015', status: '年份不一致', result_type: '年份不一致', source_table: '材料表', confidence: 90, suggestion: '请按现行版本复核' },
@@ -113,7 +113,8 @@ test('task detail exposes the three-layer result workspace and editable Markdown
   await page.getByRole('tab', { name: '图纸内容解析结果' }).click()
   const editor = page.getByRole('textbox', { name: 'Markdown 解析结果编辑区' })
   await expect(editor.getByRole('table')).toBeVisible()
-  await expect(editor).toContainText('GB 50053-2013')
+  await expect(editor).toContainText('管 口 表')
+  await expect(editor).toContainText('HG/T20592-2009')
   await page.screenshot({ path: `output/playwright/markdown-editor-${pathPrefix ? 'drawing-review' : 'standalone'}-${testInfo.project.name}.png`, fullPage: true })
   await editor.fill('已人工修订')
   await expect(editor).toContainText('已人工修订')

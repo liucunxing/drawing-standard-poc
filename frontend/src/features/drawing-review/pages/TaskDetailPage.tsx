@@ -210,23 +210,65 @@ interface ContentRecognitionProps {
   onDraftChange: (key: string, value: string) => void
 }
 
+const firstNonBlankMarkdown = (...values: Array<string | null | undefined>) => values.find((value) => value?.trim()) || ''
+
+function resolveMarkdownFileUrl(table: RecognitionTable): string {
+  if (table.markdown_url?.trim()) return resolveApiFileUrl(table.markdown_url)
+  const normalizedPath = String(table.markdown_path || '').trim().replace(/\\/g, '/')
+  if (!normalizedPath) return ''
+  if (/^markdown\//i.test(normalizedPath)) return resolveApiFileUrl(normalizedPath)
+  const markerIndex = normalizedPath.toLowerCase().lastIndexOf('/markdown/')
+  return markerIndex >= 0 ? resolveApiFileUrl(normalizedPath.slice(markerIndex + 1)) : ''
+}
+
 function ContentRecognition({ tables, drafts, onDraftChange }: ContentRecognitionProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [editorRevision, setEditorRevision] = useState(0)
+  const [loadedMarkdown, setLoadedMarkdown] = useState<Record<string, string>>({})
+  const [loadingKey, setLoadingKey] = useState('')
+  const [loadErrorKey, setLoadErrorKey] = useState('')
   useEffect(() => setSelectedIndex(0), [tables])
   const table = tables[selectedIndex]
+  const draftKey = table ? `${table.pdf_name}-${table.page}-${table.table_index}` : ''
+  const inlineMarkdown = table ? firstNonBlankMarkdown(table.raw_markdown_content, table.markdown_content, table.highlighted_markdown_content) : ''
+  const markdownFileUrl = table ? resolveMarkdownFileUrl(table) : ''
+  const fileMarkdown = draftKey ? loadedMarkdown[draftKey] || '' : ''
+  const sourceMarkdown = firstNonBlankMarkdown(inlineMarkdown, fileMarkdown)
+
+  useEffect(() => {
+    if (!draftKey || inlineMarkdown || !markdownFileUrl || fileMarkdown) return
+    const controller = new AbortController()
+    setLoadingKey(draftKey)
+    setLoadErrorKey('')
+    void fetch(markdownFileUrl, { signal: controller.signal, headers: { Accept: 'text/markdown, text/plain, */*' } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const content = await response.text()
+        if (!content.trim()) throw new Error('Markdown 文件内容为空')
+        setLoadedMarkdown((current) => ({ ...current, [draftKey]: content }))
+      })
+      .catch((reason: unknown) => {
+        if (reason instanceof DOMException && reason.name === 'AbortError') return
+        setLoadErrorKey(draftKey)
+      })
+      .finally(() => setLoadingKey((current) => current === draftKey ? '' : current))
+    return () => controller.abort()
+  }, [draftKey, fileMarkdown, inlineMarkdown, markdownFileUrl])
+
   if (!table) return <div className={styles.resultEmpty}><Empty description="暂无图纸内容解析结果" /></div>
-  const draftKey = `${table.pdf_name}-${table.page}-${table.table_index}`
-  const sourceMarkdown = table.raw_markdown_content || table.markdown_content
-  const markdown = drafts[draftKey] ?? sourceMarkdown
+  const hasDraft = Object.prototype.hasOwnProperty.call(drafts, draftKey)
+  const markdown = hasDraft ? drafts[draftKey] : sourceMarkdown
   return <section className={styles.resultSection} aria-labelledby="content-result-title">
     <div className={styles.resultHeading}><h2 id="content-result-title" className={styles.resultTitle}>图纸内容解析明细</h2>
       <Select value={selectedIndex} className={styles.resultSelect} aria-label="选择识别表格" onChange={setSelectedIndex} options={tables.map((item, index) => ({ value: index, label: `${display(item.display_name) || `表格 ${item.table_index}`} · ${display(item.pdf_name)} 第 ${item.page || '—'} 页` }))} /></div>
     <div className={styles.contentSplit}>
       <div className={styles.contentPane}><h3>表格图片</h3>{table.image_url || table.image_path ? <Image src={resolveApiFileUrl(table.image_url || table.image_path)} alt="识别表格裁剪图" /> : <Empty description="裁剪图地址缺失" />}</div>
-      <div className={styles.contentPane}><div className={styles.editorHeading}><h3>Markdown 解析结果（可编辑）</h3><Button type="link" size="small" onClick={() => { onDraftChange(draftKey, sourceMarkdown); setEditorRevision((current) => current + 1) }}>恢复识别结果</Button></div>
-        <VisualMarkdownEditor key={`${draftKey}-${editorRevision}`} value={markdown} onChange={(value) => onDraftChange(draftKey, value)} />
-        <Typography.Text type="secondary" className={styles.draftNote}>可直接点击表格单元格或文字修改；编辑仅保留在当前页面，不会回写服务端。</Typography.Text>
+      <div className={styles.contentPane}><div className={styles.editorHeading}><h3>Markdown 解析结果（可编辑）</h3><Button type="link" size="small" disabled={!sourceMarkdown} onClick={() => { onDraftChange(draftKey, sourceMarkdown); setEditorRevision((current) => current + 1) }}>恢复识别结果</Button></div>
+        {hasDraft || markdown
+          ? <><VisualMarkdownEditor key={`${draftKey}-${editorRevision}`} value={markdown} onChange={(value) => onDraftChange(draftKey, value)} />
+            <Typography.Text type="secondary" className={styles.draftNote}>可直接点击表格单元格或文字修改；编辑仅保留在当前页面，不会回写服务端。</Typography.Text></>
+          : <div className={styles.markdownLoadState}>{loadingKey === draftKey ? <><Spin size="small" /><span>正在加载 Markdown 内容…</span></>
+            : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loadErrorKey === draftKey ? 'Markdown 内容加载失败，请刷新后重试' : '后端未返回该表格的 Markdown 内容'} />}</div>}
       </div>
     </div>
   </section>

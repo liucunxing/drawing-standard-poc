@@ -12,4 +12,16 @@ describe('SafeMarkdown', () => {
     expect(html).toContain('<mark>重点</mark>')
     expect(html).toContain('<table>')
   })
+
+  it('renders the real rowspan and colspan table shape instead of dropping its content', () => {
+    const html = renderSafeMarkdown('<table><tr><td rowspan=1 colspan=15>管 口 表</td></tr><tr><td rowspan=1 colspan=2>符号</td><td>N1</td></tr></table>')
+    const container = document.createElement('div')
+    container.innerHTML = html
+
+    expect(container.querySelectorAll('table')).toHaveLength(1)
+    expect(container.querySelectorAll('tr')).toHaveLength(2)
+    expect(container.querySelectorAll('td')).toHaveLength(3)
+    expect(container.querySelector('td')).toHaveAttribute('colspan', '15')
+    expect(container).toHaveTextContent('管 口 表')
+  })
 })

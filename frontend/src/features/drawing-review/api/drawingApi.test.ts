@@ -4,7 +4,7 @@ const apiRequestMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../../../shared/api/client', () => ({ apiRequest: apiRequestMock }))
 
-import { normalizeTask, uploadPdfs } from './drawingApi'
+import { normalizeRecognitionTable, normalizeTask, normalizeTaskDetail, uploadPdfs } from './drawingApi'
 
 beforeEach(() => apiRequestMock.mockReset())
 
@@ -16,6 +16,38 @@ describe('normalizeTask status compatibility', () => {
 
   it('normalizes numeric status strings to the current numeric contract', () => {
     expect(normalizeTask({ task_id: 'T-3', status: '2' } as never).status).toBe(2)
+  })
+})
+
+describe('normalizeTaskDetail Markdown compatibility', () => {
+  it('uses non-blank backend Markdown aliases instead of preserving an empty editor value', () => {
+    const markdown = '<table><tr><td rowspan=1 colspan=15>管 口 表</td></tr><tr><td>N1</td></tr></table>'
+    const detail = normalizeTaskDetail({
+      task_id: 'T-MD',
+      tables: [{
+        table_index: 2,
+        page_number: 1,
+        source_image: 'table_blocks/T-MD/table_2.png',
+        raw_markdown_content: '  \n',
+        md_content: markdown,
+        md_url: '/api/files/markdown/T-MD/table_2.md',
+      }],
+    } as never)
+
+    expect(detail.tables[0]).toMatchObject({
+      table_index: 2,
+      page: 1,
+      display_name: '表格2',
+      image_path: 'table_blocks/T-MD/table_2.png',
+      raw_markdown_content: markdown,
+      markdown_content: markdown,
+      markdown_url: '/api/files/markdown/T-MD/table_2.md',
+    })
+  })
+
+  it('falls back across highlighted and Qwen content fields', () => {
+    expect(normalizeRecognitionTable({ highlighted_markdown_content: '<table><tr><td>高亮结果</td></tr></table>' }).raw_markdown_content).toContain('高亮结果')
+    expect(normalizeRecognitionTable({ qwen_fixed_md_content: '<table><tr><td>修复结果</td></tr></table>' }).raw_markdown_content).toContain('修复结果')
   })
 })
 

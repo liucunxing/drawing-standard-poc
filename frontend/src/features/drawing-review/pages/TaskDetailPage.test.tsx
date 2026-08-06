@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TaskDetailPage } from './TaskDetailPage'
 
 Object.defineProperty(window, 'matchMedia', {
@@ -26,7 +26,7 @@ const detail = {
     year_mismatch_count: 0, similar_count: 0, not_found_count: 0, error_message: '', created_at: null, updated_at: null,
     started_at: null, completed_at: null, description: '', processed_count: 1, pdfs: [],
     annotated_images: [{ pdf_name: 'A.pdf', page: 1, image_path: 'tasks/a.png', image_url: '' }],
-    tables: [{ pdf_name: 'A.pdf', page: 1, table_index: 1, display_name: '材料表', image_path: 'tasks/table.png', image_url: '', raw_markdown_content: '<table><tbody><tr><td>序号</td><td>规格</td></tr><tr><td>1</td><td>DN80</td></tr></tbody></table>', markdown_content: '', highlighted_markdown_content: '<mark>DN80</mark>' }],
+    tables: [{ pdf_name: 'A.pdf', page: 1, table_index: 1, display_name: '材料表', image_path: 'tasks/table.png', image_url: '', raw_markdown_content: '  \n', markdown_content: '<table><tbody><tr><td rowspan=1 colspan=15>管 口 表</td></tr><tr><td>序号</td><td>规格</td></tr><tr><td>1</td><td>DN80</td></tr></tbody></table>', highlighted_markdown_content: '<mark>DN80</mark>', markdown_path: '', markdown_url: '' }],
     standards: [{ pdf_name: 'A.pdf', standard_no: 'GB 1', matched_standard: 'GB 1-2024', status: '完全符合', result_type: '完全符合', source_table: '材料表', confidence: 98, suggestion: '无需修改' }], overall_standard_compare: {},
 }
 
@@ -39,6 +39,8 @@ describe('TaskDetailPage', () => {
     vi.clearAllMocks()
     drawingApi.getTaskDetail.mockResolvedValue(detail)
   })
+
+  afterEach(() => vi.unstubAllGlobals())
 
   it('loads the requested four result tabs and real task fields', async () => {
     renderPage()
@@ -63,6 +65,7 @@ describe('TaskDetailPage', () => {
     const editor = screen.getByRole('textbox', { name: 'Markdown 解析结果编辑区' })
     expect(editor).toHaveAttribute('contenteditable', 'true')
     expect(within(editor).getByRole('table')).toBeInTheDocument()
+    expect(within(editor).getByText('管 口 表')).toBeInTheDocument()
     expect(within(editor).getByText('DN80')).toBeInTheDocument()
     expect(editor).not.toHaveTextContent('<table>')
     editor.innerHTML = '<table><tbody><tr><td>已编辑</td></tr></tbody></table>'
@@ -77,6 +80,27 @@ describe('TaskDetailPage', () => {
     expect(within(screen.getByRole('textbox', { name: 'Markdown 解析结果编辑区' })).getByText('已编辑')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '恢复识别结果' }))
     expect(within(screen.getByRole('textbox', { name: 'Markdown 解析结果编辑区' })).getByText('DN80')).toBeInTheDocument()
+  })
+
+  it('loads Markdown from the existing file URL when inline compatibility fields are empty', async () => {
+    drawingApi.getTaskDetail.mockResolvedValue({
+      ...detail,
+      tables: [{ ...detail.tables[0], raw_markdown_content: '', markdown_content: '', highlighted_markdown_content: '', markdown_url: '/api/files/markdown/task-1/table-1.md' }],
+    })
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/markdown/task-1/table-1.md')) {
+        return Promise.resolve(new Response('<table><tr><td>远程管口表</td></tr></table>', { status: 200 }))
+      }
+      return Promise.reject(new Error('PDF preview unavailable in test'))
+    }))
+
+    renderPage()
+    await screen.findByText('装置图纸审查')
+    fireEvent.click(screen.getByRole('tab', { name: '图纸内容解析结果' }))
+
+    const editor = await screen.findByRole('textbox', { name: 'Markdown 解析结果编辑区' })
+    expect(within(editor).getByText('远程管口表')).toBeInTheDocument()
   })
 
   it('keeps the four-tab framework visible when detail loading fails', async () => {

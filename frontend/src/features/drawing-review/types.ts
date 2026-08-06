@@ -42,6 +42,8 @@ export interface RecognitionTable {
   raw_markdown_content: string
   markdown_content: string
   highlighted_markdown_content: string
+  markdown_path: string
+  markdown_url: string
 }
 
 export interface AnnotatedImage {
