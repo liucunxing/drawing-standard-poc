@@ -275,21 +275,14 @@ function ContentRecognition({ tables, drafts, onDraftChange }: ContentRecognitio
 }
 
 function toAnalysisRows(detail: TaskDetail): AnalysisRow[] {
-  const rawResults = Array.isArray(detail.overall_standard_compare.results) ? detail.overall_standard_compare.results : []
-  if (rawResults.length) return rawResults.map((item, index) => {
-    const row = isRecord(item) ? item : {}
-    const extracted = isRecord(row.extracted) ? row.extracted : undefined
-    const matched = isRecord(row.matched_library_entry) ? row.matched_library_entry : undefined
-    return {
-      key: `overall-${index}`,
-      source: recordText(row, 'pdf_name', 'source_table') || '全部图纸',
-      extracted: recordText(extracted, 'original') || recordText(row, 'standard_no', 'original_text'),
-      matched: recordText(matched, 'original') || recordText(row, 'matched_standard', 'matched_standard_no') || '未匹配',
-      status: recordText(row, 'status', 'result_type', 'match_status'),
-      suggestion: recordText(row, 'message', 'suggestion'),
-    }
-  })
-  return detail.standards.map((item, index) => ({ key: `standard-${index}`, source: item.pdf_name || item.source_table, extracted: item.standard_no, matched: item.matched_standard, status: item.status || item.result_type, suggestion: item.suggestion }))
+  return detail.standards.map((item, index) => ({
+    key: `standard-${index}`,
+    source: item.source_table || item.pdf_name || '未知来源',
+    extracted: item.standard_no,
+    matched: item.matched_standard,
+    status: item.status || item.result_type,
+    suggestion: item.suggestion,
+  }))
 }
 
 function StandardAnalysis({ detail }: { detail: TaskDetail }) {
