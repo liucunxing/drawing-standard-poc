@@ -1,5 +1,5 @@
 import { HistoryOutlined, PlusOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
-import { Button, Card, Empty, Modal, Table, Typography, notification } from 'antd'
+import { Button, Card, Empty, Modal, Table, Tooltip, Typography, notification } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -63,26 +63,48 @@ export function DashboardPage() {
       title: '任务名称',
       dataIndex: 'task_name',
       key: 'task_name',
+      width: '20%',
       ellipsis: true,
       render: (value: string, task) => (
-        <Button type="link" className={styles.taskLink} onClick={() => navigate(`/tasks/${task.task_id}`)}>
-          {value || '未命名任务'}
-        </Button>
+        <Tooltip title={value || '未命名任务'}>
+          <Button type="link" className={styles.taskLink} onClick={() => navigate(`/tasks/${task.task_id}`)}>
+            {value || '未命名任务'}
+          </Button>
+        </Tooltip>
       ),
     },
-    { title: '文件数', dataIndex: 'pdf_count', key: 'pdf_count', width: 90, align: 'right' },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 110, render: (status) => <TaskStatusTag status={status} /> },
+    { 
+      title: '文件数', 
+      dataIndex: 'pdf_count', 
+      key: 'pdf_count', 
+      width: '20%',
+    },
+    { 
+      title: '状态', 
+      dataIndex: 'status', 
+      key: 'status', 
+      width: '20%',
+      render: (status) => <TaskStatusTag status={status} /> 
+    },
     {
       title: '当前进度',
       key: 'progress',
-      width: 180,
-      render: (_, task) => task.current_step || `${task.progress}%`,
+      width: '20%',
+      ellipsis: true,
+      render: (_, task) => {
+        const progressText = task.current_step || `${task.progress}%`
+        return (
+          <Tooltip title={progressText}>
+            <span>{progressText}</span>
+          </Tooltip>
+        )
+      },
     },
     {
       title: '更新时间',
       dataIndex: 'updated_at',
       key: 'updated_at',
-      width: 180,
+      width: '20%',
       render: (value: string | null) => formatDateTime(value),
     },
   ]

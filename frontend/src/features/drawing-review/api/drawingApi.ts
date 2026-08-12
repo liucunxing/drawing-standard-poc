@@ -45,10 +45,19 @@ export function normalizeTask(raw: RawTask): TaskSummary {
   const taskId = textValue(raw.task_id)
   const originalFilename = textValue(raw.original_filename)
   const fileNames = textArray(raw.file_names)
+  // 从 task_id 中提取任务名（去掉最后的时间戳部分）
+  const extractTaskName = (taskId: string): string => {
+    if (!taskId) return ''
+    // 找到最后一个下划线的位置
+    const lastUnderscoreIndex = taskId.lastIndexOf('_')
+    if (lastUnderscoreIndex === -1) return taskId
+    // 返回下划线前面的部分
+    return taskId.substring(0, lastUnderscoreIndex)
+  }
   return {
     id: raw.id == null ? undefined : numberValue(raw.id),
     task_id: taskId,
-    task_name: textValue(raw.task_name) || originalFilename || taskId || '未命名任务',
+    task_name: textValue(raw.task_name) || extractTaskName(taskId) || originalFilename || taskId || '未命名任务',
     original_filename: originalFilename,
     file_names: fileNames.length ? fileNames : originalFilename ? [originalFilename] : [],
     pdf_count: numberValue(raw.pdf_count) || fileNames.length || (originalFilename ? 1 : 0),
