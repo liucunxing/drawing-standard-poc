@@ -30,7 +30,7 @@ export function NewReviewPage() {
 
   useEffect(() => {
     if (blocker.state !== 'blocked') return
-    if (window.confirm('当前任务仍在处理中，离开页面会中断后续文件处理。确定离开吗？')) blocker.proceed()
+    if (window.confirm('⚠️ 任务进行中，请勿离开当前页面！\n\n后端尚未支持异步处理，离开页面将导致其他页面数据无法加载。\n请等待任务完成后再进行其他操作。\n\n确定要强制离开吗？')) blocker.proceed()
     else blocker.reset()
   }, [blocker])
 

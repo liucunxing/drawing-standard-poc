@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { getTaskDetail } from '../api/drawingApi'
 import { renderSafeMarkdown } from '../components/markdownRenderer'
-import type { RecognitionTable, StandardMatch, TaskDetail } from '../types'
+import type { AnnotatedImage, RecognitionTable, StandardMatch, TaskDetail } from '../types'
 import { readTaskSessionMetadata } from '../taskMetadata'
 import { resolveApiFileUrl } from '../../../shared/api/client'
 import { formatDateTime, formatFileSize } from '../../../shared/format'
@@ -14,6 +14,7 @@ type ResultView = 'standard-info' | 'layout' | 'content' | 'analysis'
 
 interface AnalysisRow {
   key: string
+  pdfName: string
   source: string
   extracted: string
   matched: string
@@ -34,7 +35,7 @@ const recordText = (record: Record<string, unknown> | undefined, ...keys: string
 
 const safeUploadFilename = (filename: string) => filename.split(/[\\/]/).pop()?.trim().replace(/[\\/:*?"<>|]+/g, '_') || 'upload.pdf'
 
-function PdfPreview({ detail }: { detail: TaskDetail }) {
+function PdfPreview({ detail, onFileChange }: { detail: TaskDetail; onFileChange?: (index: number) => void }) {
   const [fileIndex, setFileIndex] = useState(0)
   const [previewUrl, setPreviewUrl] = useState('')
   const [previewError, setPreviewError] = useState('')
@@ -48,6 +49,11 @@ function PdfPreview({ detail }: { detail: TaskDetail }) {
   useEffect(() => {
     setFileIndex(0)
   }, [detail.task_id])
+
+  const handleFileChange = useCallback((index: number) => {
+    setFileIndex(index)
+    onFileChange?.(index)
+  }, [onFileChange])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -77,7 +83,7 @@ function PdfPreview({ detail }: { detail: TaskDetail }) {
 
   const fallbackImage = detail.annotated_images[0]
   return <div className={styles.previewBlock}>
-    {detail.file_names.length > 1 && <Select className={styles.previewSelect} value={fileIndex} aria-label="选择原始图纸" onChange={setFileIndex}
+    {detail.file_names.length > 1 && <Select className={styles.previewSelect} value={fileIndex} aria-label="选择原始图纸" onChange={handleFileChange}
       options={detail.file_names.map((name, index) => ({ value: index, label: name }))} />}
     <div className={styles.pdfFrame}>
       {previewUrl ? <iframe title={`原始图纸预览：${fileName}`} src={`${previewUrl}#page=1&view=FitH&toolbar=0`} />
@@ -92,7 +98,7 @@ function PdfPreview({ detail }: { detail: TaskDetail }) {
   </div>
 }
 
-function DrawingSummary({ detail }: { detail: TaskDetail }) {
+function DrawingSummary({ detail, onFileChange }: { detail: TaskDetail; onFileChange?: (index: number) => void }) {
   const metadata = useMemo(() => readTaskSessionMetadata(detail.task_id), [detail.task_id])
   const raw = detail.raw_json
   const primaryFile = detail.file_names[0] || detail.original_filename
@@ -101,7 +107,7 @@ function DrawingSummary({ detail }: { detail: TaskDetail }) {
     <div className={styles.summaryGrid}>
       <section aria-labelledby="drawing-preview-title">
         <h2 id="drawing-preview-title" className={styles.sectionTitle}>图纸原始预览</h2>
-        <PdfPreview detail={detail} />
+        <PdfPreview detail={detail} onFileChange={onFileChange} />
       </section>
       <section aria-labelledby="drawing-info-title">
         <div className={styles.infoHeading}><h2 id="drawing-info-title" className={styles.sectionTitle}>图纸基础信息</h2><TaskStatusTag status={detail.status} /></div>
@@ -124,13 +130,24 @@ function DrawingSummary({ detail }: { detail: TaskDetail }) {
 }
 
 function ResultSummary({ active, detail }: { active: ResultView; detail: TaskDetail }) {
-  const inconsistent = detail.year_mismatch_count + detail.not_found_count
-  const manual = detail.similar_count + Math.max(0, detail.standard_count - detail.exact_match_count - inconsistent - detail.similar_count)
+  const stats = useMemo(() => {
+    let exact = 0; let yearMismatch = 0; let notFound = 0; let similar = 0
+    for (const s of detail.standards) {
+      const st = s.status || s.result_type
+      if (st === '完全符合') exact++
+      else if (st === '年份不一致') yearMismatch++
+      else if (st === '不存在') notFound++
+      else if (st === '较为相似') similar++
+    }
+    return { exact, yearMismatch, notFound, similar, total: detail.standards.length }
+  }, [detail.standards])
+  const inconsistent = stats.yearMismatch + stats.notFound
+  const manual = stats.similar + Math.max(0, stats.total - stats.exact - inconsistent - stats.similar)
   if (active === 'layout') return <div className={styles.contextLine}><b>当前标签：图纸版面识别结果</b><span>展示后端已返回的版面定位标注图，共 {detail.annotated_images.length} 张。</span></div>
   if (active === 'content') return <div className={styles.contextLine}><b>当前标签：图纸内容解析结果</b><span>左侧为表格裁剪图，右侧 Markdown 可在本页临时编辑，共 {detail.tables.length} 项。</span></div>
   return <div className={styles.reviewSummary}>
     <b>{active === 'analysis' ? '标准匹配分析统计' : '审查结果统计汇总'}</b>
-    <span><i className={styles.exactDot} />审查一致 <strong>{detail.exact_match_count}</strong> 条</span>
+    <span><i className={styles.exactDot} />审查一致 <strong>{stats.exact}</strong> 条</span>
     <span><i className={styles.mismatchDot} />审查不一致 <strong>{inconsistent}</strong> 条</span>
     <span><i className={styles.manualDot} />待人工审核 <strong>{manual}</strong> 条</span>
   </div>
@@ -277,7 +294,8 @@ function ContentRecognition({ tables, drafts, onDraftChange }: ContentRecognitio
 function toAnalysisRows(detail: TaskDetail): AnalysisRow[] {
   return detail.standards.map((item, index) => ({
     key: `standard-${index}`,
-    source: item.source_table || item.pdf_name || '未知来源',
+    pdfName: item.pdf_name || '未知文件',
+    source: item.source_table || '未知来源',
     extracted: item.standard_no,
     matched: item.matched_standard,
     status: item.status || item.result_type,
@@ -290,7 +308,8 @@ function StandardAnalysis({ detail }: { detail: TaskDetail }) {
   return <section className={styles.resultSection} aria-labelledby="analysis-result-title">
     <h2 id="analysis-result-title" className={styles.resultTitle}>标准匹配分析明细</h2>
     <Table<AnalysisRow> rowKey="key" pagination={false} size="middle" scroll={{ x: 980 }} dataSource={rows} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无标准匹配分析结果" /> }} columns={[
-      { title: '图纸来源', dataIndex: 'source', width: 180, render: display },
+      { title: '图纸来源', dataIndex: 'pdfName', width: 200, render: display },
+      { title: '数据来源', dataIndex: 'source', width: 120, render: display },
       { title: '图纸识别结果', dataIndex: 'extracted', width: 210, render: display },
       { title: 'GB 标准识别结果', dataIndex: 'matched', width: 220, render: display },
       { title: '比对结果', dataIndex: 'status', width: 140, render: (status: string) => <Tag color={standardColor(status)}>{display(status)}</Tag> },
@@ -320,6 +339,17 @@ const tabItems = [
   { key: 'analysis', label: '标准匹配分析结果', children: null },
 ]
 
+function filterDetailByFile(detail: TaskDetail, fileName: string): TaskDetail {
+  if (!fileName) return detail
+  const matchPdfName = (item: { pdf_name?: string }) => (item.pdf_name || '') === fileName
+  return {
+    ...detail,
+    standards: detail.standards.filter(matchPdfName),
+    tables: detail.tables.filter(matchPdfName),
+    annotated_images: detail.annotated_images.filter((img: AnnotatedImage) => (img.pdf_name || '') === fileName),
+  }
+}
+
 export function TaskDetailPage() {
   const { taskId = '' } = useParams()
   const [notificationApi, notificationContext] = notification.useNotification()
@@ -327,8 +357,10 @@ export function TaskDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [active, setActive] = useState<ResultView>('standard-info')
+  const [selectedFileIndex, setSelectedFileIndex] = useState(0)
   const contentDrafts = useRef<Record<string, string>>({})
   useEffect(() => { contentDrafts.current = {} }, [taskId])
+  useEffect(() => { setSelectedFileIndex(0) }, [detail?.task_id])
   const updateContentDraft = useCallback((key: string, value: string) => {
     contentDrafts.current[key] = value
   }, [])
@@ -344,16 +376,23 @@ export function TaskDetailPage() {
   }, [notificationApi, taskId])
   useEffect(() => { void load() }, [load])
 
+  const hasMultipleFiles = detail ? detail.file_names.length > 1 : false
+  const activeFile = useMemo(() => detail?.file_names[selectedFileIndex] || '', [detail?.task_id, selectedFileIndex, detail?.file_names])
+  const filteredDetail = useMemo(() => {
+    if (!detail) return null
+    return hasMultipleFiles ? filterDetailByFile(detail, activeFile) : detail
+  }, [detail, hasMultipleFiles, activeFile])
+
   return <main className="page-container">
     {notificationContext}
     <div className="page-header"><div><h1 className="page-title">任务详情</h1><p className="page-description">{detail?.task_id || taskId || '—'}</p></div>{detail && <TaskStatusTag status={detail.status} />}</div>
-    {detail ? <Space direction="vertical" size={16} className={styles.fullWidth}>
-      <DrawingSummary detail={detail} />
+    {detail && filteredDetail ? <Space direction="vertical" size={16} className={styles.fullWidth}>
+      <DrawingSummary detail={detail} onFileChange={setSelectedFileIndex} />
       <Card className={styles.tabCard}>
         <Tabs className={styles.resultTabs} activeKey={active} onChange={(key) => setActive(key as ResultView)} items={tabItems} />
-        <ResultSummary active={active} detail={detail} />
+        <ResultSummary active={active} detail={filteredDetail} />
       </Card>
-      <Card className={styles.resultCard}><ResultPanel active={active} detail={detail} contentDrafts={contentDrafts.current} onContentDraftChange={updateContentDraft} /></Card>
+      <Card className={styles.resultCard}><ResultPanel active={active} detail={filteredDetail} contentDrafts={contentDrafts.current} onContentDraftChange={updateContentDraft} /></Card>
     </Space> : <Space direction="vertical" size={16} className={styles.fullWidth}>
       <Card className={styles.tabCard}><Tabs className={styles.resultTabs} activeKey={active} onChange={(key) => setActive(key as ResultView)} items={tabItems} /></Card>
       <Card className={styles.resultCard}>{loading ? <div className={styles.state}><Spin /><span>正在加载任务详情…</span></div> : <Empty description={error ? '任务数据暂不可用' : '未找到任务详情'} image={Empty.PRESENTED_IMAGE_SIMPLE}>{error && <Button size="small" onClick={() => void load()}>重新加载</Button>}</Empty>}</Card>

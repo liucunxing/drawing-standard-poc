@@ -14,8 +14,8 @@ export default defineConfig(({ mode }) => {
     base: normalizeBase(env.VITE_APP_BASE),
     plugins: [react()],
     server: {
-      host: '0.0.0.0',
-      port: 5173,
+      host: '127.0.0.1',
+      port: 3000,
       proxy: {
         '/api': {
           target,

@@ -8,6 +8,7 @@ RUN corepack enable && pnpm install --frozen-lockfile
 COPY frontend/ ./
 ARG VITE_APP_BASE=/
 ENV VITE_APP_BASE=${VITE_APP_BASE}
+RUN corepack enable && pnpm config set registry https://registry.npmmirror.com && pnpm install --frozen-lockfile
 RUN pnpm build
 
 FROM nginx:1.27-alpine
