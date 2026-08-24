@@ -9,6 +9,8 @@
 - 最新实际开发线：`origin/feature/react-mvp` @ `579f851`
 - 本地 CPU 验证分支：`codex/local-cpu-run-20260824`
 - 本地 CPU 工作树：`D:\MyLife\09_工作资料\0910_南京石化\99_Workspace\drawing-standard-mvp-local-cpu`
+- 客户性能候选分支：`codex/customer-llm-perf-20260825`，基于最新 `origin/master` @ `1676ff2`
+- 客户性能候选工作树：`D:\MyLife\09_工作资料\0910_南京石化\99_Workspace\drawing-standard-mvp-customer-llm-perf`
 - 原 `master` 工作树存在用户未提交内容且与远端分叉，本次没有覆盖、清理或切换它。
 - 本次没有推送远端，也没有部署客户环境。
 
@@ -17,8 +19,12 @@
 1. `fix(deploy): align MinerU 3.1.15 pipeline dependencies`：客户 GPU 候选环境也需要的 MinerU 依赖/兼容修正，可单独 cherry-pick。
 2. `chore(local): add verified Windows CPU runtime`：本地 CPU、模型下载、数据库初始化和前端机械修正，不替换客户 GPU Compose。
 3. `docs(audit): record local validation and production blockers`：README 与审计报告。
+4. `chore: checkpoint before LLM correction optimization`：用户要求的优化前空提交，可作为比较和回退锚点。
+5. `perf(llm): bound MinerU correction to validated row patches`：本次性能优化；本地开发线提交为 `f445766`。
 
-交付时以 `git log --oneline -3` 显示的实际 SHA 为准，不在文档中固化可能变化的短 SHA。
+交付前仍需分别用 `git log --oneline` 核对本地开发线和客户候选线 SHA，避免按分支名或文档文字盲目部署。
+
+`origin/master` 与当前 React 开发线没有共同祖先，直接 cherry-pick 本地提交会在 Qwen 集成文件产生冲突。因此已在客户基线单独完成移植并提交为 `f5dda07`，只包含性能代码、配置、测试和基准脚本；该分支仍是未推送、未现场验收的候选，不等同于 Customer-Go。
 
 ## 2. 实际技术栈
 
@@ -37,12 +43,14 @@
 PDF 上传
   -> Paddle PP-DocLayout_plus-L 版面检测与表格裁剪
   -> MinerU 3.1.15 Pipeline 转 Markdown
+  -> 管口表已知列漂移本地确定性修正
+  -> 仅歧义行可选调用客户内网 Qwen，返回并校验 JSON 单元格补丁
   -> 标准号规则提取与归一化
   -> MySQL standard_data 比对
   -> React 任务中心、详情和人工修订
 ```
 
-外部 Qwen 后处理已禁用，不属于本地或生产主链路。
+旧版“整份 Markdown 输入、整份 Markdown 输出”的 Qwen 调用已移除。本地确定性修正默认启用且不访问网络；歧义行 LLM 回退默认关闭，只允许配置客户内网 OpenAI-compatible 端点。
 
 ## 3. 本机已验证的 CPU 运行环境
 
@@ -77,6 +85,7 @@ Test-NetConnection 127.0.0.1 -Port 3307
 | MySQL 数据 | `%LOCALAPPDATA%\drawing-standard-mvp-runtime\mysql-data` |
 | 运行时临时目录 | `%LOCALAPPDATA%\drawing-standard-mvp-runtime\tmp` |
 | 模型清单 | `models/model-manifest.local.json`（本地生成、Git 忽略） |
+| 本地 Qwen | Ollama 已安装但模型清单为空；本轮未下载无代表性的 32B/小参数模型 |
 
 Paddle Windows 原生库在包含中文的项目路径下出现过模型加载问题，因此 Paddle 模型和 MySQL 数据放在 `%LOCALAPPDATA%` 的纯 ASCII 路径；MinerU ModelScope snapshot 已在项目路径中验证可用。不要把这些本地绝对路径直接复制到客户 Linux 配置。
 
@@ -210,6 +219,41 @@ D:\MyLife\09_工作资料\0910_南京石化\99_Workspace\model-cache-quarantine-
 
 其中还包含一次中断下载产生的约 26 MB ModelScope partial cache。确认新模型和业务验证稳定后，再由人工决定是否永久删除隔离目录；不得把隔离目录提交到 Git。
 
+### 5.4 MinerU 转 Markdown 后处理性能
+
+历史客户部署代码把整份 Markdown 放进提示词，并要求 Qwen 重新生成整份文档，输出上限曾设置为 16,384 tokens；调用中也没有显式关闭 Qwen 思考模式或记录 Token/分段耗时。全量输入会增加 prefill，完整文档输出会直接放大解码时间，默认思考模式还可能产生额外生成 Token。GPU 利用率、量化、并发排队和推理服务参数仍需在客户现场通过日志确认，不能只凭本地推断。
+
+当前策略：
+
+- 常见年份末位右漂、标准首字母左漂、`G/T` 缺 `H` 均在本地按白名单规则修正，通常不再调用 LLM。
+- 只有仍携带可恢复漂移字符的歧义行才发送给 LLM；不发送全文，模型只返回 JSON 单元格补丁。
+- 补丁必须保持三个目标单元格的字符守恒、减少异常特征且不改 HTML；不合法输出自动拒绝并保留原文供人工复核。
+- Qwen-vLLM/SGLang 请求显式传入 `enable_thinking=false`，提示词同时使用 `/no_think`；输出上限默认 512 tokens，超时 60 秒，默认不重试。
+- 每次处理记录本地耗时、候选行数、请求字符数以及服务返回的 prompt/completion/total tokens，不记录文档正文或密钥。
+
+本机没有 Qwen 模型，也没有可用的 GPT/Qwen API 凭据，所以没有伪造 32B 模型时延。可重复的 200 行合成表负载基准为：旧契约输入 13,738 字符、预期完整输出 13,600 字符；新契约只发送 466 字符的 1 个歧义行请求并返回 83 字符补丁，输入/输出字符负载分别减少 96.61%/99.39%，20 个常见错误由规则处理，本地总处理约 4–7 ms。该数字不包含真实模型推理，仅用于证明请求/输出边界已收敛。
+
+```powershell
+.\.venv-local-cpu\Scripts\python.exe -B scripts\benchmark_llm_correction.py --rows 200
+```
+
+本地默认配置见 `.env.local.example`。客户内网 Qwen 配置见 `.env.example`，启用时至少设置：
+
+```dotenv
+NOZZLE_CORRECTION_ENABLED=true
+LLM_CORRECTION_ENABLED=true
+LLM_BASE_URL=http://YOUR_INTERNAL_QWEN_ENDPOINT/v1
+LLM_API_KEY=REPLACE_WITH_SECRET
+LLM_MODEL=/models/YOUR_QWEN_MODEL
+LLM_PROVIDER=qwen-vllm
+LLM_DISABLE_THINKING=true
+LLM_MAX_OUTPUT_TOKENS=512
+LLM_TIMEOUT_SECONDS=60
+LLM_MAX_RETRIES=0
+```
+
+详细诊断、指标定义和客户 A/B 验收步骤见 [`docs/llm_correction_performance_2026-08-25.md`](docs/llm_correction_performance_2026-08-25.md)。
+
 ## 6. 本地 Docker Compose：可选但本次未完成运行验收
 
 仓库提供独立 CPU 配置：
@@ -248,11 +292,13 @@ docker compose --env-file .env.local -f compose.local.yml ps
 | 模型设备 | `MINERU_DEVICE_MODE=cpu` | 必须在客户 GPU 实测 |
 | 数据库 | 本地 MySQL 8.4.11、3307、回环绑定 | 客户 MySQL，凭据仅由受控 secret 注入 |
 | 模型 | 本地 snapshot + manifest | 客户持久化模型卷 + manifest + 哈希 |
+| Markdown 后处理 | 本地规则启用、LLM 回退关闭 | 本地规则启用；歧义行仅访问客户内网 Qwen |
 
 客户环境部署原则：
 
 - 不要用 `compose.local.yml` 或 `.env.local.example` 覆盖客户部署文件。
 - 需要部署 MinerU 兼容修正时，只 cherry-pick 对应的 `fix(deploy)` 提交；本地 CPU 与审计提交可按需选择。
+- 本次 LLM 性能改动位于优化前 checkpoint 之后；客户线使用已验证移植提交 `f5dda07`，不要直接复制本地 `.env.local`、模型目录或整条 React 开发历史。
 - 本地 CPU 通过只证明功能链路，不证明 CUDA、显存、吞吐或客户图纸效果。
 - 客户部署前必须处理审计报告中的 Critical/High 阻断项，至少确认身份网关、路径/上传限制、凭据轮换、生产模型卷、镜像 digest 和失败回滚。
 - 客户候选 GPU 容器必须在无外网条件下预加载模型，并用合成 PDF 做一次真实 smoke test 后再接入客户数据。
@@ -262,7 +308,8 @@ docker compose --env-file .env.local -f compose.local.yml ps
 | 检查 | 结果 |
 |---|---|
 | `pip check` | 通过 |
-| 后端 unittest | 3/3 通过 |
+| 后端 unittest | 14/14 通过（含 11 个管口表修正、MinerU 触发、合并单元格保护、LLM 补丁及真实 SDK 协议边界测试） |
+| 客户基线移植专项测试 | `f5dda07` 上 11/11 通过 |
 | 前端 unit | 10 个文件、28/28 通过 |
 | ESLint | 通过，0 warning |
 | TypeScript typecheck | 通过 |
@@ -270,7 +317,7 @@ docker compose --env-file .env.local -f compose.local.yml ps
 | `/drawing-review` 基路径 build/HTTP | 200，资源前缀正确 |
 | Playwright E2E | 独立根路径 16/16，`/drawing-review` 基路径 16/16；Chrome 1366/1920 |
 | 真实浏览器 console | 0 error、0 warning |
-| Docker Compose config | 通过；容器运行未验收 |
+| Docker Compose config | 本地 Compose 通过；客户候选 Compose 使用临时占位 `.env` 通过并已清理，仍有原有 `version` obsolete warning；容器运行未验收 |
 
 后端：
 
@@ -319,6 +366,7 @@ pnpm build
 - 上传、服务器路径输入、同步模型推理、任务并发和临时目录存在生产阻断风险。
 - 当前依赖扫描存在已知漏洞，详见审计报告；本阶段没有擅自升级可能破坏 MinerU 的核心依赖。
 - 模型效果依赖客户图纸版式，POC 结果必须保留人工复核。
+- 客户 Qwen 32B 的真实 p50/p95、排队时间和 tokens/s 尚未现场 A/B；本地结果只验证规则正确性与负载收敛。
 - `deploy.sh`、客户 GPU 模型卷和故障回滚仍需在目标服务器单独验证。
 - 当前前端生产包有约 683 KB 主 chunk，放到下一阶段优化。
 

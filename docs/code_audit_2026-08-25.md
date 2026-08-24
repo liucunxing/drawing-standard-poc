@@ -161,7 +161,7 @@ Bandit 共报告 16 项：6 Medium、10 Low。原始 JSON 位于 `.local-runtime
 - 数据库调用大部分使用 PyMySQL 参数绑定；Bandit 的动态 SQL 告警经人工核查未确认注入。
 - Markdown 渲染在 `frontend/src/features/drawing-review/components/markdownRenderer.ts:1-16` 使用 DOMPurify 清洗。
 - CORS 默认为关闭，仅在显式设置 `CORS_ORIGINS` 时开启（`backend/app/main.py:56-69`）。
-- 外部 Qwen 后处理在生产主链路中已禁用。
+- 旧版全量外部 Qwen 后处理已移除；本地有界规则默认启用，歧义行 LLM 回退默认关闭，端点和密钥不再写入代码。性能与现场启用边界见 `llm_correction_performance_2026-08-25.md`。
 - 本地 Compose 的 MySQL、后端和前端只绑定 `127.0.0.1`；本地 CPU 后端镜像使用固定 Python 基础镜像 digest 和非 root 用户。
 - `.env.local`、模型、虚拟环境、日志和本地运行输出均被 Git 忽略。
 
@@ -184,7 +184,7 @@ Bandit 共报告 16 项：6 Medium、10 Low。原始 JSON 位于 `.local-runtime
 
 | 检查 | 结果 |
 |---|---|
-| 后端 unittest | 3/3 通过 |
+| 后端 unittest | 14/14 通过（含 11 个管口表有界修正、MinerU 触发及 SDK 协议专项测试） |
 | 前端 unit | 10 个文件、28/28 通过 |
 | ESLint | 通过，0 warning |
 | TypeScript typecheck | 通过 |
