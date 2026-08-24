@@ -1756,24 +1756,25 @@ class PocService:
                 # 判断是否应用了补丁
                 patched = result.get('md_patched', False)
                 
-                # 检查是否有 Qwen 管口表修复版本
+                # 检查是否有管口表有界修正版本（qwen_fixed_* 为兼容旧契约）
                 qwen_fixed_md_file = result.get('qwen_fixed_md_file')
                 qwen_fixed_applied = result.get('qwen_fixed_applied', False)
+                correction_metrics = result.get('correction_metrics')
                 qwen_fixed_md_content = ""
                 qwen_fixed_md_url = ""
-                original_md_file = md_file   # 保留原始(未Qwen修复)的md路径
+                original_md_file = md_file   # 保留未做管口表有界修正的 md 路径
                 original_md_url = md_url
                 original_md_content = md_content
                 
                 if qwen_fixed_applied and qwen_fixed_md_file and Path(qwen_fixed_md_file).exists():
-                    # 有 Qwen 修复版本: 接口主字段返回修复后的md
+                    # 有修正版本: 接口主字段返回修正后的 md
                     qwen_fixed_md_content = Path(qwen_fixed_md_file).read_text(encoding='utf-8')
                     qwen_fixed_md_url = self._local_path_to_url(qwen_fixed_md_file)
-                    # 主字段切换为 Qwen 修复版本
+                    # 主字段切换为管口表有界修正版本
                     md_file = qwen_fixed_md_file
                     md_url = qwen_fixed_md_url
                     md_content = qwen_fixed_md_content
-                    print(f"[POC] 表格 {idx+1} 使用 Qwen 修复版本作为主输出")
+                    print(f"[POC] 表格 {idx+1} 使用管口表有界修正版本作为主输出")
                 
                 results.append({
                     "table_index": original_table_index,
@@ -1788,6 +1789,7 @@ class PocService:
                     "md_content": md_content,
                     "patched": patched,
                     "qwen_fixed_applied": qwen_fixed_applied,
+                    "correction_metrics": correction_metrics,
                     "qwen_fixed_md_file": qwen_fixed_md_file,
                     "qwen_fixed_md_url": qwen_fixed_md_url,
                     "qwen_fixed_md_content": qwen_fixed_md_content,
@@ -1797,7 +1799,7 @@ class PocService:
                     "success": True,
                 })
                 
-                print(f"[POC] 表格 {idx+1} 转换成功: {md_file} {'(已优化)' if patched else '(原始)'}{'(Qwen修复)' if qwen_fixed_applied else ''}")
+                print(f"[POC] 表格 {idx+1} 转换成功: {md_file} {'(已优化)' if patched else '(原始)'}{'(管口表修正)' if qwen_fixed_applied else ''}")
                 
             except Exception as exc:
                 print(f"[POC] 表格 {idx+1} 转换失败: {exc}")

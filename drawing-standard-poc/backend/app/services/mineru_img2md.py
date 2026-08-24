@@ -27,8 +27,10 @@ from pathlib import Path
 from PIL import Image
 import shutil
 
-# [上线禁用] Qwen 大模型后处理 - 生产环境不允许调用外部大模型
-# from backend.app.services.qween_test import fix_nozzle_table_md
+from backend.app.services.nozzle_markdown_corrector import (
+    correct_nozzle_table_md,
+    nozzle_correction_enabled,
+)
 
 os.environ.setdefault('MINERU_MODEL_SOURCE', 'local')
 
@@ -114,11 +116,12 @@ def _apply_flange_standard_patch_json(json_obj):
 
 
 def _should_apply_qwen_nozzle_fix(md_content):
-    """Trigger Qwen fix when markdown looks like nozzle table content.
+    """Trigger bounded correction when markdown looks like nozzle-table content.
 
     Conditions:
     1) Contains '管口表' (compatible with OCR spaces/HTML tags), or
-    2) Contains both '法兰标准' and '公称压力' (for images missing the title).
+    2) Contains both '法兰标准' and '公称压力' (for images missing the title), or
+    3) Contains all three columns used by the bounded correction rules.
     """
     if not isinstance(md_content, str) or not md_content:
         return False
@@ -135,7 +138,13 @@ def _should_apply_qwen_nozzle_fix(md_content):
     if "管口表" in visible_text:
         return True
 
-    return ("法兰标准" in visible_text) and ("公称压力" in visible_text)
+    if ("法兰标准" in visible_text) and ("公称压力" in visible_text):
+        return True
+
+    return all(
+        column in visible_text
+        for column in ("公称尺寸DN", "法兰标准", "法兰类型代号")
+    )
 
 
 def _parse_pdf_to_md_json(do_parse, pdf_bytes, temp_dir, pdf_name):
@@ -407,31 +416,39 @@ def image_to_markdown(
             encoding="utf-8",
         )
 
-        # 步骤8: 管口表 Qwen 后处理
-        # ================================================================
-        # [上线禁用] 以下 Qwen 大模型调用已在生产环境禁用
-        # 原因: 生产环境不允许调用外部大模型API
-        # 如需恢复，取消下方注释并恢复 import fix_nozzle_table_md
-        # ================================================================
+        # 步骤8: 管口表有界后处理
+        # 已知列漂移优先由本地规则修正；只有歧义行才按环境配置调用内部 LLM。
+        # qwen_fixed_* 字段/文件名前缀为兼容现有 API 契约而保留。
         qwen_fixed_md_content = None
         qwen_fixed_applied = False
         qwen_fixed_md_target = None
+        correction_metrics = None
 
-        # [上线禁用] Qwen 管口表修复逻辑 - 已注释
-        # if _should_apply_qwen_nozzle_fix(patched_md_content):
-        #     print(f"[img2md] 检测到管口表特征, 调用 Qwen 后处理修复列错位...")
-        #     qwen_fixed_md_content = fix_nozzle_table_md(patched_md_content)
-        #     qwen_fixed_applied = qwen_fixed_md_content != patched_md_content
-        #
-        #     if qwen_fixed_applied:
-        #         qwen_fixed_md_target = output_dir / f"qwen_fixed_{task_id}.md"
-        #         qwen_fixed_md_target.write_text(qwen_fixed_md_content, encoding="utf-8")
-        #         print(f"[img2md] Qwen 修复完成, 已保存: {qwen_fixed_md_target}")
-        #     else:
-        #         print(f"[img2md] Qwen 返回内容与原始一致, 未生成修复文件")
-        # else:
-        #     print(f"[img2md] 未命中管口表触发条件, 跳过 Qwen 后处理")
-        print(f"[img2md] Qwen 管口表后处理已禁用(生产环境限制)")
+        if not nozzle_correction_enabled():
+            print("[img2md] 管口表有界后处理已由 NOZZLE_CORRECTION_ENABLED 关闭")
+        elif _should_apply_qwen_nozzle_fix(patched_md_content):
+            correction_result = correct_nozzle_table_md(patched_md_content)
+            qwen_fixed_md_content = correction_result.content
+            qwen_fixed_applied = correction_result.changed
+            correction_metrics = correction_result.metrics.to_dict()
+
+            if qwen_fixed_applied:
+                qwen_fixed_md_target = output_dir / f"qwen_fixed_{task_id}.md"
+                qwen_fixed_md_target.write_text(qwen_fixed_md_content, encoding="utf-8")
+                print(
+                    "[img2md] 管口表修正完成, "
+                    f"method={correction_result.metrics.method}, "
+                    f"duration_ms={correction_result.metrics.duration_ms}, "
+                    f"已保存: {qwen_fixed_md_target}"
+                )
+            else:
+                print(
+                    "[img2md] 管口表无需自动修改, "
+                    f"method={correction_result.metrics.method}, "
+                    f"needs_review_rows={correction_result.metrics.needs_review_rows}"
+                )
+        else:
+            print("[img2md] 未命中管口表触发条件, 跳过有界后处理")
 
         return {
             'md_file': str(raw_md_target),
@@ -442,6 +459,7 @@ def image_to_markdown(
             'json_patched': json_patched,
             'qwen_fixed_md_file': str(qwen_fixed_md_target) if qwen_fixed_md_target else None,
             'qwen_fixed_applied': qwen_fixed_applied,
+            'correction_metrics': correction_metrics,
             'dpi': dpi,
             'scale': scale,
             'split_applied': split_applied,
@@ -531,9 +549,9 @@ def process_task(task_id, table_blocks_dir=None, output_base_dir=None, dpi=300, 
             print(f"  Patched Markdown: {result.get('patched_md_file')}")
             print(f"  Patched JSON: {result.get('patched_json_file')}")
             print(f"  补丁命中: md={result.get('md_patched')} json={result.get('json_patched')}")
-            print(f"  Qwen管口表修复: {'是' if result.get('qwen_fixed_applied') else '否'}")
+            print(f"  管口表有界修正: {'是' if result.get('qwen_fixed_applied') else '否'}")
             if result.get('qwen_fixed_md_file'):
-                print(f"  Qwen修复文件: {result['qwen_fixed_md_file']}")
+                print(f"  修正文件: {result['qwen_fixed_md_file']}")
             print(f"  参数: dpi={result.get('dpi')} scale={result.get('scale')}")
             print(f"  切分: {'是' if result.get('split_applied') else '否'}")
             if result.get('split_reason'):
@@ -549,6 +567,7 @@ def process_task(task_id, table_blocks_dir=None, output_base_dir=None, dpi=300, 
                 'md_patched': result.get('md_patched', False),
                 'json_patched': result.get('json_patched', False),
                 'qwen_fixed_applied': result.get('qwen_fixed_applied', False),
+                'correction_metrics': result.get('correction_metrics'),
                 'dpi': result.get('dpi'),
                 'scale': result.get('scale'),
                 'split_applied': result.get('split_applied', False),
