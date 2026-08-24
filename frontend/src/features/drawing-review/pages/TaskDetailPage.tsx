@@ -24,7 +24,6 @@ interface AnalysisRow {
 
 const display = (value: string | number | null | undefined) => value === '' || value == null ? '—' : String(value)
 const standardColor = (status: string) => ({ 完全符合: 'success', 年份不一致: 'warning', 较为相似: 'processing', 不存在: 'error', 解析错误: 'error', 待识别: 'warning' }[status] || 'default')
-const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const recordText = (record: Record<string, unknown> | undefined, ...keys: string[]) => {
   for (const key of keys) {
     const value = record?.[key]
@@ -377,7 +376,7 @@ export function TaskDetailPage() {
   useEffect(() => { void load() }, [load])
 
   const hasMultipleFiles = detail ? detail.file_names.length > 1 : false
-  const activeFile = useMemo(() => detail?.file_names[selectedFileIndex] || '', [detail?.task_id, selectedFileIndex, detail?.file_names])
+  const activeFile = useMemo(() => detail?.file_names[selectedFileIndex] || '', [detail?.file_names, selectedFileIndex])
   const filteredDetail = useMemo(() => {
     if (!detail) return null
     return hasMultipleFiles ? filterDetailByFile(detail, activeFile) : detail

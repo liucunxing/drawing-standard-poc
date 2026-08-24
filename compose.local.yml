@@ -1,0 +1,113 @@
+name: drawing-standard-local
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${LOCAL_MYSQL_DATABASE:-drawing_poc}
+      MYSQL_USER: ${LOCAL_MYSQL_USER:-drawing_poc}
+      MYSQL_PASSWORD: ${LOCAL_MYSQL_PASSWORD:-drawing_local_dev}
+      MYSQL_ROOT_PASSWORD: ${LOCAL_MYSQL_ROOT_PASSWORD:-drawing_local_root_dev}
+    ports:
+      - "127.0.0.1:${LOCAL_MYSQL_PORT:-3307}:3306"
+    volumes:
+      - drawing-local-mysql:/var/lib/mysql
+      - ./docker/local/mysql/001-schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - drawing-local-net
+
+  backend:
+    image: drawing-standard-backend:local-cpu
+    build:
+      context: .
+      dockerfile: Dockerfile.backend.local
+    restart: unless-stopped
+    environment: &backend-environment
+      MYSQL_HOST: db
+      MYSQL_PORT: "3306"
+      MYSQL_DB: ${LOCAL_MYSQL_DATABASE:-drawing_poc}
+      MYSQL_USER: ${LOCAL_MYSQL_USER:-drawing_poc}
+      MYSQL_PASSWORD: ${LOCAL_MYSQL_PASSWORD:-drawing_local_dev}
+      CORS_ORIGINS: ""
+      LOG_DIR: /app/logs
+      MODEL_ROOT: /app/models
+      MINERU_DEVICE_MODE: cpu
+      MINERU_MODEL_SOURCE: local
+      MINERU_TOOLS_CONFIG_JSON: /app/models/mineru/mineru.json
+      MINERU_DOWNLOAD_SOURCE: ${MINERU_DOWNLOAD_SOURCE:-modelscope}
+      MODELSCOPE_CACHE: /app/models/modelscope
+      HF_HOME: /app/models/huggingface
+      PADDLE_PDX_CACHE_HOME: /app/models/paddlex
+      PADDLEOCR_LOCAL_MODELS_ROOT: /app/models/paddlex/official_models
+      PADDLEOCR_LAYOUT_MODEL_NAME: PP-DocLayout_plus-L
+      PADDLE_PDX_MODEL_SOURCE: BOS
+      CUDA_VISIBLE_DEVICES: ""
+      FLAGS_use_onednn: "0"
+      FLAGS_use_mkldnn: "0"
+      FLAGS_enable_pir_api: "0"
+      FLAGS_enable_pir_in_executor: "0"
+    ports:
+      - "127.0.0.1:${LOCAL_BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./logs/local-backend:/app/logs
+      - ./data/tmp:/app/project/drawing-standard-poc/backend/tmp
+      - ./models:/app/models
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - drawing-local-net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_APP_BASE: /
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${LOCAL_FRONTEND_PORT:-8501}:8501"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8501/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - drawing-local-net
+
+  model-init:
+    profiles: ["setup"]
+    image: drawing-standard-backend:local-cpu
+    build:
+      context: .
+      dockerfile: Dockerfile.backend.local
+    environment: *backend-environment
+    command: ["python", "/app/project/scripts/download_models_local.py"]
+    volumes:
+      - ./models:/app/models
+    networks:
+      - drawing-local-net
+
+volumes:
+  drawing-local-mysql:
+
+networks:
+  drawing-local-net:
+    driver: bridge

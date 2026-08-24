@@ -1,0 +1,72 @@
+# Local-only CPU image. The customer GPU image remains Dockerfile.backend.
+FROM python:3.10-slim@sha256:a78e4529630cfe8c5199cafd6e0c28ee1579a13f86274396d8b6b2d80367aa3a
+
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PYTORCH_CPU_INDEX_URL=https://download.pytorch.org/whl/cpu
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    MINERU_DEVICE_MODE=cpu \
+    MINERU_MODEL_SOURCE=local \
+    CUDA_VISIBLE_DEVICES="" \
+    FLAGS_use_onednn=0 \
+    FLAGS_use_mkldnn=0 \
+    FLAGS_enable_pir_api=0 \
+    FLAGS_enable_pir_in_executor=0
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    fonts-wqy-microhei \
+    fonts-wqy-zenhei \
+    git \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    libgfortran5 \
+    poppler-utils \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN python -m pip config set global.index-url "${PIP_INDEX_URL}" \
+    && python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install \
+       --index-url "${PYTORCH_CPU_INDEX_URL}" \
+       torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0
+
+COPY requirements-linux.txt requirements-local-cpu.txt /app/
+RUN python -m pip install -r /app/requirements-local-cpu.txt \
+    && python -m pip check
+
+RUN useradd --create-home --uid 10001 app \
+    && mkdir -p /app/logs /app/models /app/project \
+    && chown -R app:app /app
+
+COPY --chown=app:app . /app/project
+
+WORKDIR /app/project/drawing-standard-poc
+RUN mkdir -p backend/tmp
+
+USER app
+
+ENV UVICORN_RELOAD=false \
+    UVICORN_PORT=8000 \
+    LOG_DIR=/app/logs \
+    BACKEND_TMP_DIR=/app/project/drawing-standard-poc/backend/tmp \
+    MINERU_TOOLS_CONFIG_JSON=/app/models/mineru/mineru.json \
+    MODELSCOPE_CACHE=/app/models/modelscope \
+    HF_HOME=/app/models/huggingface \
+    PADDLE_PDX_CACHE_HOME=/app/models/paddlex \
+    PADDLEOCR_LOCAL_MODELS_ROOT=/app/models/paddlex/official_models \
+    PADDLEOCR_LAYOUT_MODEL_NAME=PP-DocLayout_plus-L \
+    PADDLE_PDX_MODEL_SOURCE=BOS
+
+EXPOSE 8000
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info", "--access-log"]

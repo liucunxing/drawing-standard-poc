@@ -7,6 +7,16 @@ __pycache__/
 .vscode/
 .git/
 .gitignore
+.local-runtime/
+.venv-local-cpu/
+.playwright-cli/
+frontend/.playwright-cli/
+frontend/coverage/
+frontend/dist/
+frontend/node_modules/
+frontend/output/playwright/
+frontend/playwright-report/
+frontend/test-results/
 *.md
 mockups/
 docs/
@@ -16,3 +26,5 @@ models/
 *.pdf
 .env
 .env.example
+.env.local
+.env.local.example

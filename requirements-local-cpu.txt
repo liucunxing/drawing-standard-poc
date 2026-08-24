@@ -1,0 +1,7 @@
+# Local CPU runtime extends the shared Linux application manifest.
+# PyTorch CPU wheels are installed first by Dockerfile.backend.local from the
+# official PyTorch CPU index so pip cannot silently select a CUDA build.
+-r requirements-linux.txt
+
+# Keep the Paddle runtime version aligned with the production GPU runtime.
+paddlepaddle==3.2.1
