@@ -25,7 +25,6 @@ pymysql==1.1.3
 # ---------- OCR / 表格识别 ----------
 mineru==3.1.15
 mineru-vl-utils==0.2.8
-struct-eqtable==0.3.3
 rapid-table==1.0.5
 paddleocr==3.5.0
 paddlex==3.5.2
@@ -54,6 +53,8 @@ scipy==1.15.3
 
 # ---------- 深度学习（CPU 部分） ----------
 accelerate==1.13.0
+# MinerU 3.1.15 pipeline requires transformers>=4.57.3.  Keep this aligned
+# with the captured project environment in requirements.txt.
 transformers==4.57.6
 transformers-stream-generator==0.0.5
 tokenizers==0.22.2

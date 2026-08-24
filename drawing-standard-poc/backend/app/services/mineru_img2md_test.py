@@ -4,7 +4,7 @@ MinerU 图片转 Markdown 最佳方案
 
 模型配置:
 - OCR 模型: MinerU Pipeline (pipeline backend)
-- 表格模型: struct_eqtable
+- 表格模型: MinerU 3.1.15 Pipeline 内置的有线/无线表格模型
 - 语言: 中文 (ch)
 
 预处理方案: smart_dilate_v2 (智能膨胀 - 保留表格线版本)
@@ -29,8 +29,7 @@ from pathlib import Path
 from PIL import Image
 import shutil
 
-os.environ['MINERU_MODEL_SOURCE'] = 'local'
-os.environ['MINERU_TABLE_MODEL'] = 'struct_eqtable'
+os.environ.setdefault('MINERU_MODEL_SOURCE', 'local')
 
 
 def _normalize_standard_prefix_in_text(text):

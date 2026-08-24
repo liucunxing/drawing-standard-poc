@@ -4,7 +4,7 @@ MinerU 图片转 Markdown 最佳方案
 
 模型配置:
 - OCR 模型: MinerU Pipeline (pipeline backend)
-- 表格模型: struct_eqtable
+- 表格模型: MinerU 3.1.15 Pipeline 内置的有线/无线表格模型
 - 语言: 中文 (ch)
 
 预处理方案: smart_dilate_v2 (智能膨胀 - 保留表格线版本)
@@ -30,8 +30,7 @@ import shutil
 # [上线禁用] Qwen 大模型后处理 - 生产环境不允许调用外部大模型
 # from backend.app.services.qween_test import fix_nozzle_table_md
 
-os.environ['MINERU_MODEL_SOURCE'] = 'local'
-os.environ['MINERU_TABLE_MODEL'] = 'struct_eqtable'
+os.environ.setdefault('MINERU_MODEL_SOURCE', 'local')
 
 
 _STD_PREFIXES = [

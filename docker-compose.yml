@@ -37,7 +37,7 @@ services:
       - ./models/paddlex:/root/.paddlex
       # MinerU 模型缓存
       - ./models/mineru:/root/.cache/mineru
-      # HuggingFace 模型缓存（struct_eqtable等）
+      # HuggingFace 模型缓存（仅在 MinerU 配置选择 HuggingFace 源时使用）
       - ./models/huggingface:/root/.cache/huggingface
     networks:
       - drawing-net
