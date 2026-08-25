@@ -85,13 +85,13 @@ Test-NetConnection 127.0.0.1 -Port 3307
 | MySQL 数据 | `%LOCALAPPDATA%\drawing-standard-mvp-runtime\mysql-data` |
 | 运行时临时目录 | `%LOCALAPPDATA%\drawing-standard-mvp-runtime\tmp` |
 | 模型清单 | `models/model-manifest.local.json`（本地生成、Git 忽略） |
-| 本地 Qwen | Ollama 已安装但模型清单为空；本轮未下载无代表性的 32B/小参数模型 |
+| 本地 Qwen | `D:\Models\Qwen3.5-9B\Qwen3.5-9B-Q4_K_M.gguf`，Q4_K_M，5,680,522,464 bytes；`llama.cpp-b10066` + Intel Arc 130T 验证可运行 |
 
 Paddle Windows 原生库在包含中文的项目路径下出现过模型加载问题，因此 Paddle 模型和 MySQL 数据放在 `%LOCALAPPDATA%` 的纯 ASCII 路径；MinerU ModelScope snapshot 已在项目路径中验证可用。不要把这些本地绝对路径直接复制到客户 Linux 配置。
 
 ## 4. 重启后在本机启动
 
-以下命令针对本次已准备好的本机运行资产。三个服务建议分别开 PowerShell 终端。
+以下命令针对本次已准备好的本机运行资产。MySQL、后端和前端建议分别开 PowerShell 终端；本地 Qwen 仅在测试 LLM 歧义行回退时按需启动。
 
 ### 4.1 MySQL（端口未监听时执行）
 
@@ -159,6 +159,22 @@ Set-Location (Join-Path $repo 'drawing-standard-poc')
 Set-Location 'D:\MyLife\09_工作资料\0910_南京石化\99_Workspace\drawing-standard-mvp-local-cpu\frontend'
 pnpm.cmd dev --host 127.0.0.1 --port 8501 --strictPort
 ```
+
+### 4.4 本地 Qwen3.5-9B（可选）
+
+```powershell
+& 'D:\Models\Qwen3.5-9B\start-qwen3.5-9b.ps1'
+& 'D:\Models\Qwen3.5-9B\test-qwen3.5-9b.ps1'
+```
+
+Windows 当前把 TCP `8034–8133` 作为系统排除端口段，固定使用 8111 会绑定失败。启动脚本已改为先探测 8111，不可绑定时自动回退 18111；测试脚本会自动发现这两个端口。可用下列命令复核当前系统状态：
+
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+Invoke-RestMethod http://127.0.0.1:18111/health
+```
+
+该本地服务使用 `ctx-size=8192`、`n-gpu-layers=99`、关闭思考参数进行性能验证。它不是客户 Qwen 32B，也不得把本地模型路径或端口复制到客户部署配置。
 
 关闭前后端终端即可停止对应服务。MySQL 可用其 `bin\mysqladmin.exe` 对 `127.0.0.1:3307` 执行受控 shutdown；不要直接删除 `mysql-data`。
 
@@ -231,11 +247,26 @@ D:\MyLife\09_工作资料\0910_南京石化\99_Workspace\model-cache-quarantine-
 - Qwen-vLLM/SGLang 请求显式传入 `enable_thinking=false`，提示词同时使用 `/no_think`；输出上限默认 512 tokens，超时 60 秒，默认不重试。
 - 每次处理记录本地耗时、候选行数、请求字符数以及服务返回的 prompt/completion/total tokens，不记录文档正文或密钥。
 
-本机没有 Qwen 模型，也没有可用的 GPT/Qwen API 凭据，所以没有伪造 32B 模型时延。可重复的 200 行合成表负载基准为：旧契约输入 13,738 字符、预期完整输出 13,600 字符；新契约只发送 466 字符的 1 个歧义行请求并返回 83 字符补丁，输入/输出字符负载分别减少 96.61%/99.39%，20 个常见错误由规则处理，本地总处理约 4–7 ms。该数字不包含真实模型推理，仅用于证明请求/输出边界已收敛。
+本机已使用 Qwen3.5-9B Q4_K_M 做合成数据真实推理。结论支持“完整文档输出是主要瓶颈，默认思考模式进一步放大耗时”，但 9B 不能代替客户 32B 做质量或绝对时延验收：
+
+- 200 行旧契约仅原始提示词约 9,109 tokens，尚未生成输出就超过本地 8,192 context；预期完整输出另约 8,539 tokens。
+- 5 行旧契约关闭思考：837 prompt tokens、254 completion tokens，总耗时 87.494 秒；其中 decode 67.603 秒，占 77.3%，且输出未精确匹配预期。
+- 5 行旧契约默认思考：运行约 333 秒后仍未完成，已生成至少 996 tokens，人工中止；没有可用修正文档。
+- 200 行新契约冷调用：只发送 466 字符的 1 个歧义行，274 prompt tokens、34 completion tokens，总耗时 19.725 秒；热缓存复测 7.877 秒。
+- 9B 返回的歧义补丁缺少配对单元格修改且字段名乱码，被本地安全校验拒绝；20 个常见错误仍由规则完成，原文没有被错误补丁覆盖。因此这次实测证明性能边界与 fail-closed 生效，不证明 9B 修正质量通过。
+
+不调用真实模型的可重复 200 行载荷基准仍为：旧契约输入 13,738 字符、预期完整输出 13,600 字符；新契约输入 466 字符、输出 83 字符，输入/输出字符负载分别减少 96.61%/99.39%，本地总处理约 4–7 ms。
 
 ```powershell
 .\.venv-local-cpu\Scripts\python.exe -B scripts\benchmark_llm_correction.py --rows 200
+
+# 本地 Qwen 服务健康后，先做 token 规模探测，再执行真实模型路径
+.\.venv-local-cpu\Scripts\python.exe -B scripts\benchmark_llm_correction_real.py token-plan
+.\.venv-local-cpu\Scripts\python.exe -B scripts\benchmark_llm_correction_real.py optimized --rows 200
+.\.venv-local-cpu\Scripts\python.exe -B scripts\benchmark_llm_correction_real.py legacy-no-think --rows 5
 ```
+
+`legacy-think` 会复现旧版默认思考行为，本机 5 行请求超过 333 秒仍未完成，因此不得在无人观察时批量运行。脚本只生成合成表并输出聚合指标、合成响应和哈希，不读取或保存客户文档。
 
 本地默认配置见 `.env.local.example`。客户内网 Qwen 配置见 `.env.example`，启用时至少设置：
 
@@ -309,6 +340,7 @@ docker compose --env-file .env.local -f compose.local.yml ps
 |---|---|
 | `pip check` | 通过 |
 | 后端 unittest | 14/14 通过（含 11 个管口表修正、MinerU 触发、合并单元格保护、LLM 补丁及真实 SDK 协议边界测试） |
+| 本地 Qwen3.5-9B 真实 A/B | 200 行新契约冷调用 19.725 秒；5 行旧契约关闭思考 87.494 秒；默认思考超过 333 秒未完成，详见性能报告 |
 | 客户基线移植专项测试 | `f5dda07` 上 11/11 通过 |
 | 前端 unit | 10 个文件、28/28 通过 |
 | ESLint | 通过，0 warning |
@@ -366,7 +398,7 @@ pnpm build
 - 上传、服务器路径输入、同步模型推理、任务并发和临时目录存在生产阻断风险。
 - 当前依赖扫描存在已知漏洞，详见审计报告；本阶段没有擅自升级可能破坏 MinerU 的核心依赖。
 - 模型效果依赖客户图纸版式，POC 结果必须保留人工复核。
-- 客户 Qwen 32B 的真实 p50/p95、排队时间和 tokens/s 尚未现场 A/B；本地结果只验证规则正确性与负载收敛。
+- 客户 Qwen 32B 的真实 p50/p95、排队时间和 tokens/s 尚未现场 A/B；本地 9B 结果验证负载收敛、耗时方向和安全拒绝路径，但歧义补丁质量未通过，不能作为客户质量验收。
 - `deploy.sh`、客户 GPU 模型卷和故障回滚仍需在目标服务器单独验证。
 - 当前前端生产包有约 683 KB 主 chunk，放到下一阶段优化。
 

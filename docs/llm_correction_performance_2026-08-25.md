@@ -91,7 +91,9 @@ LLM 补丁必须同时通过本地校验：
 
 ## 4. 本地验证结果
 
-本机现状：Ollama 已安装但 `ollama list` 为空；没有本地 Qwen 模型，也没有 GPT/Qwen API 环境凭据。本轮没有下载 32B 或小参数 Qwen，因为 CPU 运行时延不具客户代表性，小模型也不能证明 32B 修正质量。
+本机现状：Ollama 仍无模型，但发现并验证了独立 GGUF 资产 `D:\Models\Qwen3.5-9B\Qwen3.5-9B-Q4_K_M.gguf`（5,680,522,464 bytes）。本轮使用 `llama.cpp-b10066`、Intel Arc 130T、Q4_K_M、`ctx-size=8192`、`n-gpu-layers=99` 做合成数据真实 A/B。该 9B 模型只用于验证相对性能、协议边界和 fail-closed，不能代替客户 Qwen 32B 做质量或绝对时延验收。
+
+Windows 当前排除 TCP `8034–8133`，原启动端口 8111 无法绑定；本地模型脚本已改为探测 8111 并自动回退 18111。该改动仅位于 `D:\Models\Qwen3.5-9B`，不属于项目 Git 或客户部署配置。
 
 执行：
 
@@ -102,7 +104,18 @@ $env:PYTHONPATH = (Resolve-Path 'drawing-standard-poc').Path
 
 .\.venv-local-cpu\Scripts\python.exe -B `
   scripts\benchmark_llm_correction.py --rows 200
+
+.\.venv-local-cpu\Scripts\python.exe -B `
+  scripts\benchmark_llm_correction_real.py token-plan
+
+.\.venv-local-cpu\Scripts\python.exe -B `
+  scripts\benchmark_llm_correction_real.py optimized --rows 200
+
+.\.venv-local-cpu\Scripts\python.exe -B `
+  scripts\benchmark_llm_correction_real.py legacy-no-think --rows 5
 ```
+
+真实基准脚本只生成合成表，不读取或保存客户文档。`legacy-think` 模式会复现旧版默认思考行为；本机 5 行已超过 333 秒未完成，必须人工观察并设置测试上限。
 
 结果：
 
@@ -123,6 +136,19 @@ $env:PYTHONPATH = (Resolve-Path 'drawing-standard-poc').Path
 | 本地规则修正 | 20 个规则事件 |
 | 最终修改单元格 | 42 个 |
 | 本地总处理 | 约 4–7 ms，含 fake LLM 往返，不含真实模型推理 |
+
+真实模型 A/B（全部使用脚本生成的合成管口表，不读取或落盘客户文档）：
+
+| 模式 | 规模 | Token/状态 | 结果 |
+|---|---:|---|---|
+| 旧契约，关闭思考 | 5 行 | prompt 837；completion 254 | 87.494 秒；prefill 18.515 秒，decode 67.603 秒（77.3%）；输出未精确匹配预期 |
+| 旧契约，默认思考 | 5 行 | 服务端生成至少 996 tokens 后仍未结束 | 运行约 333 秒后人工中止；无可用修正文档 |
+| 新契约，冷调用 | 200 行、1 个歧义行 | prompt 274；completion 34 | 19.725 秒；20 个规则事件已执行，LLM 补丁被安全拒绝，剩余 1 行人工复核 |
+| 新契约，热缓存复测 | 同上 | 270 prompt tokens 命中 KV cache，只新评估 4 tokens | 7.877 秒；仅说明本地服务缓存效果，不作为冷态 p50 |
+
+使用同一 tokenizer 的规模探测显示：200 行旧契约原始提示词约 9,109 tokens，预期完整输出另约 8,539 tokens；仅输入就超过本地 8,192 context。100 行的提示词与预期输出合计也约 9,048 tokens。旧契约因此同时存在长时间 decode 和上下文溢出风险。
+
+9B 对歧义行返回的补丁只修改“法兰标准”，没有同时移除“法兰类型代号”的前导数字，字段名还出现乱码。本地字符守恒和异常减少校验正确拒绝该补丁，说明新实现的性能边界和 fail-closed 已生效；也说明本地 9B 不足以承担本场景的质量放行。下一步质量交叉验证应使用约 27B/32B 的受控 API 模型，最终仍须在客户实际 Qwen 32B 上验收。
 
 专项测试覆盖：MinerU 表头触发、无需修改、年份末位右漂、标准首字母左漂、双漂移、标签/属性/正文精确保留、合并或嵌套 HTML 保守跳过、仅歧义行入模、思考模式关闭参数、Token usage 采集、幻觉补丁拒绝、缺配置 fail closed；其中一项通过本机临时 OpenAI-compatible HTTP 端点验证真实 SDK 请求序列化。
 
