@@ -122,6 +122,12 @@ class TableLayoutService4Batch:
             self.table_min_score,
             max(0.05, float(os.getenv("PADDLEOCR_VL_TILE_TABLE_MIN_SCORE", "0.20"))),
         )
+        # Low-confidence text/table recall must not also admit every graphic
+        # fragment created by cutting a drawing across tile boundaries.
+        self.tile_graphic_min_score = max(
+            self.tile_layout_threshold,
+            min(0.95, float(os.getenv("PADDLEOCR_VL_TILE_GRAPHIC_MIN_SCORE", "0.30"))),
+        )
 
         self.pipeline: Any | None = None
         self.pipeline_name: str | None = None
@@ -704,13 +710,19 @@ class TableLayoutService4Batch:
                     local_bbox[3] + y1,
                 ]
                 copied["source_tile"] = f"r{row:02d}_c{col:02d}"
+                copied["source_tile_bbox"] = [x1, y1, x2, y2]
                 if "table" in self._layout_label_key(copied):
                     # The lower score is valid only because this candidate
                     # came from the low-threshold tiled fallback model.
                     copied["table_min_score"] = self.tile_table_min_score
                 translated_boxes.append(copied)
 
-        deduplicated = self._dedupe_tiled_boxes(translated_boxes)
+        # Filter before NMS: a high-score truncated graphic must not suppress
+        # a lower-score but complete detection from an overlapping tile.
+        filtered = self._filter_tiled_graphic_boxes(
+            translated_boxes, page_width, page_height,
+        )
+        deduplicated = self._dedupe_tiled_boxes(filtered)
         raw_summary = ", ".join(
             f"{label}={count}" for label, count in sorted(raw_label_counts.items())
         ) or "none"
@@ -723,6 +735,75 @@ class TableLayoutService4Batch:
     def _layout_label_key(self, item: Dict[str, Any]) -> str:
         return str(item.get("label", "other")).strip().lower().replace("-", "_").replace(" ", "_")
 
+    def _is_graphic_box(self, item: Dict[str, Any]) -> bool:
+        return self._layout_label_key(item) in {"image", "figure", "chart"}
+
+    def _filter_tiled_graphic_boxes(
+            self,
+            boxes: List[Dict[str, Any]],
+            page_width: int,
+            page_height: int,
+    ) -> List[Dict[str, Any]]:
+        """Only supplement whole-page graphics with complete tiled graphics.
+
+        Text/table candidates deliberately retain their existing thresholds and
+        geometry. In particular, do not apply the seam filter to tables: those
+        candidates are still needed by the established table-cropping path.
+        """
+        kept: List[Dict[str, Any]] = []
+        rejected = 0
+        min_area = max(4096, page_width * page_height * 0.001)
+        for item in boxes:
+            if not self._is_graphic_box(item) or "source_tile_bbox" not in item:
+                kept.append(item)
+                continue
+            bbox = self._clip_bbox4(item.get("bbox"), page_width, page_height)
+            tile = self._clip_bbox4(item["source_tile_bbox"], page_width, page_height)
+            if bbox is None or tile is None:
+                rejected += 1
+                continue
+            x1, y1, x2, y2 = bbox
+            tx1, ty1, tx2, ty2 = tile
+            tw, th = tx2 - tx1, ty2 - ty1
+            # Only artificial seams count as truncation, not physical page
+            # edges. The tolerance accounts for detector coordinate jitter.
+            mx, my = max(8, tw * 0.015), max(8, th * 0.015)
+            touches_seam = (
+                (tx1 > 0 and x1 <= tx1 + mx)
+                or (ty1 > 0 and y1 <= ty1 + my)
+                or (tx2 < page_width and x2 >= tx2 - mx)
+                or (ty2 < page_height and y2 >= ty2 - my)
+            )
+            area = (x2 - x1) * (y2 - y1)
+            if (
+                float(item.get("score", 0.0) or 0.0) < self.tile_graphic_min_score
+                or area < min_area
+                or area > tw * th * 0.80
+                or touches_seam
+            ):
+                rejected += 1
+                continue
+            kept.append(item)
+        if rejected:
+            print(f"[testP] skip truncated/noisy tiled graphics: {rejected}")
+        return kept
+
+    def _graphic_boxes_duplicate(self, a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+        """Containment, not just IoU, detects a partial view inside a full view."""
+        if not (self._is_graphic_box(a) and self._is_graphic_box(b)):
+            return False
+        aa, bb = a.get("bbox"), b.get("bbox")
+        if not (isinstance(aa, list) and isinstance(bb, list) and len(aa) == len(bb) == 4):
+            return False
+        intersection = max(0, min(aa[2], bb[2]) - max(aa[0], bb[0])) * max(
+            0, min(aa[3], bb[3]) - max(aa[1], bb[1]),
+        )
+        smaller_area = min(
+            max(0, aa[2] - aa[0]) * max(0, aa[3] - aa[1]),
+            max(0, bb[2] - bb[0]) * max(0, bb[3] - bb[1]),
+        )
+        return smaller_area > 0 and intersection / smaller_area >= 0.80
+
     def _dedupe_tiled_boxes(self, boxes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Keep the highest-confidence copy of boxes repeated by tile overlap."""
         kept: List[Dict[str, Any]] = []
@@ -733,8 +814,9 @@ class TableLayoutService4Batch:
                 continue
             label = self._layout_label_key(item)
             if any(
-                self._layout_label_key(other) == label
-                and self._bbox_iou(bbox, other.get("bbox", [])) >= 0.55
+                self._graphic_boxes_duplicate(item, other)
+                or (self._layout_label_key(other) == label
+                    and self._bbox_iou(bbox, other.get("bbox", [])) >= 0.55)
                 for other in kept
             ):
                 continue
@@ -747,7 +829,7 @@ class TableLayoutService4Batch:
             full_page_boxes: List[Dict[str, Any]],
             tiled_boxes: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Add non-duplicate tiled results without changing full-page results."""
+        """Preserve whole-page views; supplement rather than subdivide them."""
         merged = list(full_page_boxes)
         for item in tiled_boxes:
             bbox = item.get("bbox")
@@ -755,8 +837,9 @@ class TableLayoutService4Batch:
                 continue
             label = self._layout_label_key(item)
             if any(
-                self._layout_label_key(other) == label
-                and self._bbox_iou(bbox, other.get("bbox", [])) >= 0.85
+                self._graphic_boxes_duplicate(item, other)
+                or (self._layout_label_key(other) == label
+                    and self._bbox_iou(bbox, other.get("bbox", [])) >= 0.85)
                 for other in merged
             ):
                 continue
