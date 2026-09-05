@@ -21,6 +21,8 @@
 | `table_markdown` | 表格 Markdown 表 | 存储表格图片解析后的 Markdown 内容 |
 | `standard_extracted` | 标准号提取结果表 | 存储从 Markdown 中提取的标准编号 |
 | `standard_comparison` | 标准比对结果表 | 存储标准号与标准库的比对结果 |
+| `text_image` | 文字区域图片表 | 存储从 PDF 中拆分出的文字区域图片信息 |
+| `text_markdown` | 文字区域 Markdown 表 | 存储文字区域 OCR 识别后的 Markdown 内容 |
 | `standard_data` | 标准库表（已有） | 存储标准库基础数据 |
 
 ---
@@ -191,6 +193,7 @@ CREATE TABLE `standard_extracted` (
   `row_index` INT NOT NULL DEFAULT 0 COMMENT '在表格中的行号，从0开始',
   `col_index` INT NOT NULL DEFAULT 0 COMMENT '在表格中的列号，从0开始',
   `cell_text` TEXT DEFAULT NULL COMMENT '所在单元格的完整文本内容',
+  `markdown_source` VARCHAR(20) DEFAULT NULL COMMENT 'Markdown来源：NULL/空=表格(table_markdown)，text=文字区域(text_markdown)',
   
   -- 时间戳
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
@@ -281,6 +284,78 @@ CREATE TABLE `standard_data` (
   KEY `idx_standard_type` (`standard_type`),
   KEY `idx_standard_prefix` (`standard_prefix`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='标准库表';
+```
+
+---
+
+### 7. 文字区域图片表 (text_image)
+
+**用途**: 存储文字区域切割后的图片信息（与 table_image 平行）
+
+```sql
+CREATE TABLE `text_image` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '文字图片ID，主键自增',
+  `task_id` VARCHAR(64) NOT NULL COMMENT '关联的任务ID，对应 pdf_task.task_id',
+  `text_index` INT NOT NULL COMMENT '文字区域在 PDF 中的序号，从1开始',
+  `page_number` INT NOT NULL COMMENT '文字区域所在的 PDF 页码，从1开始',
+
+  -- 图片信息
+  `image_filename` VARCHAR(255) NOT NULL COMMENT '图片文件名，如 "page_001_text_001.png"',
+  `image_path` VARCHAR(500) NOT NULL COMMENT '图片文件存储路径',
+  `image_width` INT NOT NULL DEFAULT 0 COMMENT '图片宽度，单位：像素',
+  `image_height` INT NOT NULL DEFAULT 0 COMMENT '图片高度，单位：像素',
+  `file_size` BIGINT NOT NULL DEFAULT 0 COMMENT '图片文件大小，单位：字节',
+
+  -- 文字区域位置信息
+  `bbox_x` INT DEFAULT NULL COMMENT '文字区域在PDF页面中的X坐标（左上角）',
+  `bbox_y` INT DEFAULT NULL COMMENT '文字区域在PDF页面中的Y坐标（左上角）',
+  `bbox_width` INT DEFAULT NULL COMMENT '文字区域宽度',
+  `bbox_height` INT DEFAULT NULL COMMENT '文字区域高度',
+
+  -- 处理状态
+  `ocr_status` TINYINT NOT NULL DEFAULT 0 COMMENT 'OCR处理状态: 0-待处理, 1-处理中, 2-已完成, 3-失败',
+  `ocr_error` TEXT DEFAULT NULL COMMENT 'OCR处理错误信息',
+
+  -- 时间戳
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+
+  PRIMARY KEY (`id`),
+  KEY `idx_task_id` (`task_id`),
+  KEY `idx_task_text_index` (`task_id`, `text_index`),
+  KEY `idx_ocr_status` (`ocr_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文字区域图片表';
+```
+
+---
+
+### 8. 文字区域 Markdown 表 (text_markdown)
+
+**用途**: 存储文字区域 OCR 识别后的 Markdown 内容（与 table_markdown 平行）
+
+```sql
+CREATE TABLE `text_markdown` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'Markdown记录ID，主键自增',
+  `task_id` VARCHAR(64) NOT NULL COMMENT '关联的任务ID，对应 pdf_task.task_id',
+  `text_image_id` BIGINT UNSIGNED NOT NULL COMMENT '关联的文字图片ID，对应 text_image.id',
+
+  -- Markdown 内容
+  `markdown_content` MEDIUMTEXT NOT NULL COMMENT '文字区域的 Markdown 格式内容',
+  `markdown_path` VARCHAR(500) DEFAULT NULL COMMENT 'Markdown 文件存储路径',
+  `content_length` INT NOT NULL DEFAULT 0 COMMENT 'Markdown 内容长度（字符数）',
+
+  -- 解析信息
+  `parser_type` VARCHAR(50) NOT NULL DEFAULT 'paddleocr' COMMENT '解析器类型，固定为 paddleocr',
+  `confidence_score` DECIMAL(5,2) DEFAULT NULL COMMENT 'OCR 置信度评分，0.00-1.00',
+
+  -- 时间戳
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_text_image_id` (`text_image_id`),
+  KEY `idx_task_id` (`task_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文字区域Markdown表';
 ```
 
 ---

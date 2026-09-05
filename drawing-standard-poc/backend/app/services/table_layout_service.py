@@ -31,6 +31,7 @@ os.environ.setdefault("FLAGS_enable_pir_in_executor", "0")
 
 CATEGORY_COLORS: Dict[str, tuple[int, int, int]] = {
     "text": (0, 255, 0),
+    "aside_text": (0, 180, 0),
     "title": (255, 140, 0),
     "figure": (255, 0, 255),
     "table": (255, 0, 0),
@@ -96,8 +97,35 @@ class TableLayoutService4Batch:
         self.table_split_gap_ratio = float(os.getenv("PADDLEOCR_TABLE_SPLIT_GAP_RATIO", "0.10"))
         self.table_min_segment_height_ratio = float(os.getenv("PADDLEOCR_TABLE_MIN_SEGMENT_RATIO", "0.12"))
 
+        # PP-DocLayout_plus-L will resize a full page to its fixed inference
+        # size.  Keep the established whole-page path first, then use tiles
+        # only when that path has no usable table at all.  This protects the
+        # already-working large drawings from any change in their result.
+        self.tile_fallback_enabled = self._read_bool_env(
+            "PADDLEOCR_VL_TILE_FALLBACK_ENABLED",
+            default=True,
+        )
+        self.tile_rows = max(1, int(os.getenv("PADDLEOCR_VL_TILE_ROWS", "3")))
+        self.tile_cols = max(1, int(os.getenv("PADDLEOCR_VL_TILE_COLS", "4")))
+        self.tile_overlap_ratio = min(
+            0.45,
+            max(0.0, float(os.getenv("PADDLEOCR_VL_TILE_OVERLAP_RATIO", "0.15"))),
+        )
+        # Only the fallback model is allowed to return lower-confidence layout
+        # candidates.  The normal full-page model remains at its existing 0.5
+        # threshold, so successful drawings keep their current behaviour.
+        self.tile_layout_threshold = min(
+            0.49,
+            max(0.05, float(os.getenv("PADDLEOCR_VL_TILE_LAYOUT_THRESHOLD", "0.20"))),
+        )
+        self.tile_table_min_score = min(
+            self.table_min_score,
+            max(0.05, float(os.getenv("PADDLEOCR_VL_TILE_TABLE_MIN_SCORE", "0.20"))),
+        )
+
         self.pipeline: Any | None = None
         self.pipeline_name: str | None = None
+        self.tile_pipeline: Any | None = None
         self._safe_retry_done = False
 
     def export_annotated_from_pdf_path(
@@ -155,6 +183,32 @@ class TableLayoutService4Batch:
                 dst_image_path=page_png_path,
             )
             draw_boxes = self._assign_table_annotation_labels(page_png_path, draw_boxes)
+
+            tiled_fallback_used = False
+            tiled_box_count = 0
+            if self.tile_fallback_enabled and not self._has_usable_table_box(page_png_path, draw_boxes):
+                tiled_fallback_used = True
+                tiles_dir = pages_dir / f"page_{page_idx:03d}_tiles"
+                print(
+                    f"[testP] page {page_idx}: whole-page table detection empty, "
+                    f"start tiled fallback ({self.tile_rows}x{self.tile_cols}, "
+                    f"overlap={self.tile_overlap_ratio:.2f})"
+                )
+                tile_boxes = self._infer_tiled_layout_boxes(
+                    page_image_path=page_png_path,
+                    tiles_dir=tiles_dir,
+                    page_idx=page_idx,
+                )
+                tiled_box_count = len(tile_boxes)
+                draw_boxes = self._merge_tiled_boxes(draw_boxes, tile_boxes)
+                draw_boxes = self._filter_sparse_tiled_table_boxes(page_png_path, draw_boxes)
+                draw_boxes = self._assign_table_annotation_labels(page_png_path, draw_boxes)
+                print(
+                    f"[testP] page {page_idx}: tiled fallback detected "
+                    f"{tiled_box_count} block(s), usable_tables="
+                    f"{int(self._has_usable_table_box(page_png_path, draw_boxes))}"
+                )
+
             self._draw_annotation(page_png_path, draw_boxes, annotated_path)
 
             table_crops_dir = debug_dir / f"page_{page_idx:03d}_tables"
@@ -165,6 +219,15 @@ class TableLayoutService4Batch:
                 page_idx=page_idx,
             )
             table_crop_paths = [item["image_path"] for item in table_crop_items]
+
+            # 文字区域切割（与表格同目录，文件名以 _text_ 区分）
+            text_crops_dir = debug_dir / f"page_{page_idx:03d}_texts"
+            text_crop_items = self._save_text_crops_from_boxes(
+                page_image_path=page_png_path,
+                boxes=draw_boxes,
+                out_dir=text_crops_dir,
+                page_idx=page_idx,
+            )
 
             print(f"[testP] [4/4] page {page_idx}: annotated image -> {annotated_path}")
 
@@ -177,8 +240,13 @@ class TableLayoutService4Batch:
                     "table_crops_dir": str(table_crops_dir),
                     "table_crop_items": table_crop_items,
                     "table_crop_paths": table_crop_paths,
+                    "text_crops_dir": str(text_crops_dir),
+                    "text_crop_items": text_crop_items,
                     "detected_tables": len(table_crop_paths),
-                    "detected_blocks": len(boxes),
+                    "detected_texts": len(text_crop_items),
+                    "detected_blocks": len(draw_boxes),
+                    "tiled_fallback_used": tiled_fallback_used,
+                    "tiled_blocks_detected": tiled_box_count,
                 }
             )
 
@@ -364,6 +432,35 @@ class TableLayoutService4Batch:
         self.pipeline = self._create_layout_pipeline(layout_kwargs)
         self.pipeline_name = "LayoutDetection"
 
+    def _ensure_tile_pipeline(self) -> None:
+        """Create the lower-threshold model used only by tiled fallback."""
+        if self.tile_pipeline is not None:
+            return
+
+        # PaddleOCRVL does not expose this standalone layout threshold.  Keep
+        # the existing pipeline in that optional mode rather than changing its
+        # global behaviour.
+        if self.pipeline_name != "LayoutDetection":
+            return
+
+        tile_kwargs: Dict[str, Any] = {
+            "device": "cpu",
+            "threshold": self.tile_layout_threshold,
+        }
+        if self._safe_retry_done:
+            tile_kwargs.update(
+                {
+                    "enable_mkldnn": False,
+                    "ir_optim": False,
+                    "cpu_threads": 1,
+                }
+            )
+        print(
+            f"[testP] init tiled fallback LayoutDetection "
+            f"(threshold={self.tile_layout_threshold:.2f})"
+        )
+        self.tile_pipeline = self._create_layout_pipeline(tile_kwargs)
+
     def _create_layout_pipeline(self, common_kwargs: Dict[str, Any]) -> Any:
         from paddleocr import LayoutDetection
 
@@ -441,6 +538,18 @@ class TableLayoutService4Batch:
             return {}
         return results[0]
 
+    def _predict_tiled_page(self, image_path: Path) -> Any:
+        """Use a low-threshold LayoutDetection instance for fallback tiles."""
+        self._ensure_tile_pipeline()
+        if self.tile_pipeline is None:
+            return self._predict_single_page(image_path)
+
+        output = self.tile_pipeline.predict(input=str(image_path), batch_size=1)
+        results = list(output)
+        if not results:
+            return {}
+        return results[0]
+
     def _prepare_infer_image(self, page_png_path: Path) -> Path:
         if self.infer_max_side <= 0:
             return page_png_path
@@ -457,6 +566,212 @@ class TableLayoutService4Batch:
         infer_path = page_png_path.with_name(page_png_path.stem + "_infer.png")
         resized.save(infer_path)
         return infer_path
+
+    def _has_usable_table_box(self, image_path: Path, boxes: List[Dict[str, Any]]) -> bool:
+        """Match the table-crop eligibility rule without writing any crop files."""
+        if not boxes:
+            return False
+
+        width, height = Image.open(image_path).size
+        for item in boxes:
+            label = str(item.get("label", "other")).lower()
+            score = float(item.get("score", 0.0) or 0.0)
+            bbox = self._clip_bbox4(item.get("bbox"), width, height)
+            if "table" in label and score > self._table_min_score_for_box(item) and bbox is not None:
+                if bbox[2] - bbox[0] >= 20 and bbox[3] - bbox[1] >= 20:
+                    return True
+        return False
+
+    def _filter_sparse_tiled_table_boxes(
+            self,
+            image_path: Path,
+            boxes: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Discard line/dimension regions misclassified as tables by tiled fallback.
+
+        The filter is intentionally limited to lower-threshold tiled candidates
+        (identified by ``table_min_score``).  Whole-page detections therefore
+        retain the established table behaviour.
+        """
+        if not boxes:
+            return boxes
+
+        image = Image.open(image_path).convert("L")
+        gray = np.array(image)
+        width, height = image.size
+        filtered: List[Dict[str, Any]] = []
+        for item in boxes:
+            label = str(item.get("label", "other")).lower()
+            if "table" not in label or "table_min_score" not in item:
+                filtered.append(item)
+                continue
+
+            bbox = self._clip_bbox4(item.get("bbox"), width, height)
+            if bbox is None:
+                continue
+            x1, y1, x2, y2 = bbox
+            crop = gray[y1:y2, x1:x2]
+            if crop.size == 0:
+                continue
+
+            ink = crop < 232
+            ink_ratio = float(ink.mean())
+            active_row_ratio = float((ink.mean(axis=1) > 0.02).mean())
+            # A dimension chain can be extremely tall and contain a few long
+            # lines, but has very few rows with real tabular content.  Real
+            # material tables in the current drawings have far denser rows.
+            if active_row_ratio < 0.12:
+                print(
+                    f"[testP] skip sparse tiled table candidate: bbox={list(bbox)}, "
+                    f"ink={ink_ratio:.3f}, active_rows={active_row_ratio:.3f}"
+                )
+                continue
+            filtered.append(item)
+
+        return filtered
+
+    def _table_min_score_for_box(self, item: Dict[str, Any]) -> float:
+        """Read a fallback-only table threshold without weakening normal boxes."""
+        try:
+            return float(item.get("table_min_score", self.table_min_score))
+        except (TypeError, ValueError):
+            return self.table_min_score
+
+    def _tile_bounds(self, width: int, height: int) -> List[Tuple[int, int, int, int, int, int]]:
+        """Return overlapping tile bounds in source-page coordinates."""
+        bounds: List[Tuple[int, int, int, int, int, int]] = []
+        col_width = width / float(self.tile_cols)
+        row_height = height / float(self.tile_rows)
+
+        for row in range(self.tile_rows):
+            core_y1 = int(round(row * row_height))
+            core_y2 = int(round((row + 1) * row_height))
+            y_pad = int(round((core_y2 - core_y1) * self.tile_overlap_ratio / 2.0))
+            y1 = max(0, core_y1 - y_pad)
+            y2 = min(height, core_y2 + y_pad)
+
+            for col in range(self.tile_cols):
+                core_x1 = int(round(col * col_width))
+                core_x2 = int(round((col + 1) * col_width))
+                x_pad = int(round((core_x2 - core_x1) * self.tile_overlap_ratio / 2.0))
+                x1 = max(0, core_x1 - x_pad)
+                x2 = min(width, core_x2 + x_pad)
+                if x2 - x1 >= 32 and y2 - y1 >= 32:
+                    bounds.append((row + 1, col + 1, x1, y1, x2, y2))
+
+        return bounds
+
+    def _infer_tiled_layout_boxes(
+            self,
+            page_image_path: Path,
+            tiles_dir: Path,
+            page_idx: int,
+    ) -> List[Dict[str, Any]]:
+        """Run the existing layout model on overlapping source-page tiles.
+
+        Tile coordinates are translated back to the original page immediately,
+        so all downstream annotation, crop, OCR and standard-extraction logic
+        continues to receive ordinary page-coordinate boxes.
+        """
+        page_image = Image.open(page_image_path).convert("RGB")
+        page_width, page_height = page_image.size
+        tiles_dir.mkdir(parents=True, exist_ok=True)
+
+        translated_boxes: List[Dict[str, Any]] = []
+        raw_label_counts: Dict[str, int] = {}
+        tile_bounds = self._tile_bounds(page_width, page_height)
+        for row, col, x1, y1, x2, y2 in tile_bounds:
+            tile_path = tiles_dir / f"page_{page_idx:03d}_tile_r{row:02d}_c{col:02d}.png"
+            page_image.crop((x1, y1, x2, y2)).save(tile_path)
+
+            result = self._predict_tiled_page(tile_path)
+            local_boxes = self._extract_layout_boxes(result)
+            for item in local_boxes:
+                label = self._layout_label_key(item)
+                raw_label_counts[label] = raw_label_counts.get(label, 0) + 1
+            local_boxes = self._postprocess_table_boxes(local_boxes, tile_path)
+            tile_width = x2 - x1
+            tile_height = y2 - y1
+            for item in local_boxes:
+                local_bbox = self._clip_bbox4(item.get("bbox"), tile_width, tile_height)
+                if local_bbox is None:
+                    continue
+                copied = dict(item)
+                copied["bbox"] = [
+                    local_bbox[0] + x1,
+                    local_bbox[1] + y1,
+                    local_bbox[2] + x1,
+                    local_bbox[3] + y1,
+                ]
+                copied["source_tile"] = f"r{row:02d}_c{col:02d}"
+                if "table" in self._layout_label_key(copied):
+                    # The lower score is valid only because this candidate
+                    # came from the low-threshold tiled fallback model.
+                    copied["table_min_score"] = self.tile_table_min_score
+                translated_boxes.append(copied)
+
+        deduplicated = self._dedupe_tiled_boxes(translated_boxes)
+        raw_summary = ", ".join(
+            f"{label}={count}" for label, count in sorted(raw_label_counts.items())
+        ) or "none"
+        print(
+            f"[testP] page {page_idx}: tiled raw layout labels -> {raw_summary}; "
+            f"deduplicated={len(deduplicated)}"
+        )
+        return deduplicated
+
+    def _layout_label_key(self, item: Dict[str, Any]) -> str:
+        return str(item.get("label", "other")).strip().lower().replace("-", "_").replace(" ", "_")
+
+    def _dedupe_tiled_boxes(self, boxes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Keep the highest-confidence copy of boxes repeated by tile overlap."""
+        kept: List[Dict[str, Any]] = []
+        ordered = sorted(boxes, key=lambda item: float(item.get("score", 0.0) or 0.0), reverse=True)
+        for item in ordered:
+            bbox = item.get("bbox")
+            if not isinstance(bbox, list) or len(bbox) != 4:
+                continue
+            label = self._layout_label_key(item)
+            if any(
+                self._layout_label_key(other) == label
+                and self._bbox_iou(bbox, other.get("bbox", [])) >= 0.55
+                for other in kept
+            ):
+                continue
+            kept.append(item)
+
+        return kept
+
+    def _merge_tiled_boxes(
+            self,
+            full_page_boxes: List[Dict[str, Any]],
+            tiled_boxes: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Add non-duplicate tiled results without changing full-page results."""
+        merged = list(full_page_boxes)
+        for item in tiled_boxes:
+            bbox = item.get("bbox")
+            if not isinstance(bbox, list) or len(bbox) != 4:
+                continue
+            label = self._layout_label_key(item)
+            if any(
+                self._layout_label_key(other) == label
+                and self._bbox_iou(bbox, other.get("bbox", [])) >= 0.85
+                for other in merged
+            ):
+                continue
+            merged.append(item)
+
+        # Tiled execution order is row/column based.  A stable spatial order
+        # makes table numbering and debug output easier to compare between runs.
+        return sorted(
+            merged,
+            key=lambda item: (
+                int(item.get("bbox", [0, 0, 0, 0])[1]),
+                int(item.get("bbox", [0, 0, 0, 0])[0]),
+                self._layout_label_key(item),
+            ),
+        )
 
     def _extract_layout_boxes(self, result: Any) -> List[Dict[str, Any]]:
         if isinstance(result, dict) and isinstance(result.get("boxes"), list):
@@ -687,7 +1002,7 @@ class TableLayoutService4Batch:
             label = str(copied.get("label", "other")).lower()
             score = float(copied.get("score", 0.0) or 0.0)
             bbox = self._clip_bbox4(copied.get("bbox"), img_w, img_h)
-            if "table" in label and score > self.table_min_score and bbox is not None:
+            if "table" in label and score > self._table_min_score_for_box(copied) and bbox is not None:
                 table_index += 1
                 copied["table_index"] = table_index
                 copied["display_label"] = f"表格{table_index}"
@@ -728,7 +1043,7 @@ class TableLayoutService4Batch:
             x1, y1, x2, y2 = [int(v) for v in bbox]
             label = str(item.get("label", "other")).lower()
             score = float(item.get("score", 0.0) or 0.0)
-            if "table" in label and score <= self.table_min_score:
+            if "table" in label and score <= self._table_min_score_for_box(item):
                 continue
             color = CATEGORY_COLORS.get(label, CATEGORY_COLORS["other"])
             line_width = 9 if "table" in label else 3
@@ -773,7 +1088,7 @@ class TableLayoutService4Batch:
                 continue
             score = float(item.get("score", 0.0) or 0.0)
             # Output crops only when score is strictly greater than 0.51.
-            if score <= self.table_min_score:
+            if score <= self._table_min_score_for_box(item):
                 continue
             bbox = self._clip_bbox4(item.get("bbox"), width, height)
             if bbox is None:
@@ -814,6 +1129,239 @@ class TableLayoutService4Batch:
             table_items.extend(sub_table_items)
 
         return table_items
+
+    # ------------------------------------------------------------------
+    # 文字区域切割（text / title / paragraph_title / doc_title / figure_title）
+    # ------------------------------------------------------------------
+
+    # 需要提取为文字区域的标签（不区分大小写）
+    TEXT_REGION_LABELS = {"text", "title", "paragraph_title", "doc_title", "figure_title"}
+    # 只把模型明确标为 text 的大段正文送入 OCR。aside_text 在工程图中常被
+    # 用于坐标栏、图框和零散标识，不能作为正文输出。
+    _BODY_TEXT_LABELS = {"text"}
+    # 标题类标签，优先与下方的 text 合并
+    _TITLE_LABELS = {"title", "paragraph_title", "doc_title", "figure_title"}
+    # figure_title 在工程图纸中大多是视图名称；只有紧邻正文时才有 OCR 价值。
+    _MERGE_ONLY_TITLE_LABELS = {"figure_title"}
+
+    @staticmethod
+    def _is_paragraph_text_box(bbox: List[int], page_width: int, page_height: int) -> bool:
+        """Reject dimension values, view labels and other short text fragments."""
+        x1, y1, x2, y2 = bbox
+        box_width = x2 - x1
+        box_height = y2 - y1
+        min_width = max(180, int(page_width * 0.04))
+        min_height = max(36, int(page_height * 0.006))
+        min_area = max(12000, int(page_width * page_height * 0.0007))
+        return (
+            box_width >= min_width
+            and box_height >= min_height
+            and box_width * box_height >= min_area
+            and box_width >= box_height * 1.35
+        )
+
+    def _find_adjacent_body_text_index(
+            self,
+            text_boxes: List[Dict[str, Any]],
+            used: List[bool],
+            current_idx: int,
+            page_height: int,
+    ) -> int | None:
+        """Find the nearest lower body block in the same text column."""
+        current = text_boxes[current_idx]
+        current_label = current["label"]
+        if current_label not in self._TITLE_LABELS and current_label not in self._BODY_TEXT_LABELS:
+            return None
+
+        current_x1, current_y1, current_x2, current_y2 = current["bbox"]
+        current_w = current_x2 - current_x1
+        current_h = current_y2 - current_y1
+        candidates: List[Tuple[int, int, int]] = []
+
+        for idx, candidate in enumerate(text_boxes):
+            if idx == current_idx or used[idx] or candidate["label"] not in self._BODY_TEXT_LABELS:
+                continue
+
+            x1, y1, x2, y2 = candidate["bbox"]
+            if y1 < current_y1:
+                continue
+
+            candidate_w = x2 - x1
+            candidate_h = y2 - y1
+            gap = y1 - current_y2
+            # Small overlap is normal for boxes generated from overlapping tiles.
+            if gap < -max(8, min(current_h, candidate_h) // 3):
+                continue
+
+            max_gap = max(28, int(max(current_h, candidate_h) * 0.8))
+            if current_label in self._TITLE_LABELS:
+                max_gap = max(max_gap, int(max(current_h, candidate_h) * 1.6))
+            max_gap = min(max_gap, max(40, int(page_height * 0.04)))
+            if current_label in self._MERGE_ONLY_TITLE_LABELS:
+                max_gap = min(max_gap, max(28, int(page_height * 0.02)))
+            if gap > max_gap:
+                continue
+
+            horizontal_overlap = max(0, min(current_x2, x2) - max(current_x1, x1))
+            min_overlap = max(16, int(min(current_w, candidate_w) * 0.15))
+            if horizontal_overlap < min_overlap:
+                continue
+
+            center_distance = abs((current_x1 + current_x2) - (x1 + x2))
+            candidates.append((max(0, gap), center_distance, idx))
+
+        if not candidates:
+            return None
+        candidates.sort()
+        return candidates[0][2]
+
+    def _save_text_crops_from_boxes(
+            self,
+            page_image_path: Path,
+            boxes: List[Dict[str, Any]],
+            out_dir: Path,
+            page_idx: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        从布局检测结果中提取文字区域并切割为图片。
+
+        合并策略：把同一列内垂直相邻的标题/正文、以及正文/正文连续合并。
+        只输出足够大的 text 正文；尺寸、编号等零散 text 不会生成图片。
+        figure_title 若未与正文合并则不输出，避免把普通视图名称切成文字图片。
+        """
+        if not boxes:
+            return []
+
+        image = Image.open(page_image_path).convert("RGB")
+        width, height = image.size
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # 清理旧的文字切割图片
+        for stale in out_dir.glob("page_*_text_*.png"):
+            try:
+                stale.unlink()
+            except Exception:
+                pass
+
+        # 筛选文字相关 box，按 Y 坐标排序（从上到下）
+        text_boxes: List[Dict[str, Any]] = []
+        skipped_short_text_count = 0
+        for item in boxes:
+            label = str(item.get("label", "other")).strip().lower()
+            # PP-DocLayout 的类别在不同版本中可能使用空格、连字符或下划线，
+            # 统一为下划线后再和白名单比对，确保 figure title 不会被漏掉。
+            label = label.replace("-", "_").replace(" ", "_")
+            if label not in self.TEXT_REGION_LABELS:
+                continue
+            bbox = self._clip_bbox4(item.get("bbox"), width, height)
+            if bbox is None:
+                continue
+            x1, y1, x2, y2 = bbox
+            if x2 - x1 < 20 or y2 - y1 < 10:
+                continue
+            if label == "text" and not self._is_paragraph_text_box(list(bbox), width, height):
+                skipped_short_text_count += 1
+                continue
+            text_boxes.append({
+                "label": label,
+                "bbox": [x1, y1, x2, y2],
+                "score": float(item.get("score", 0.0) or 0.0),
+            })
+
+        if not text_boxes:
+            print(
+                f"[TextCrop] page {page_idx}: 未检测到符合段落条件的 text 区域, "
+                f"已跳过 {skipped_short_text_count} 个零散 text"
+            )
+            return []
+
+        text_boxes.sort(key=lambda b: b["bbox"][1])  # 按 y1 升序
+
+        # 合并标题 + 正文，以及相邻正文 + 正文。布局模型在分块推理时可能把
+        # 一个技术要求拆成标题、第一段正文、后续正文多个 box；必须沿着同一列
+        # 连续向下合并，才能保证只输出一张 OCR 图片。
+        merged_groups: List[List[int]] = []  # 每组包含的 box 索引
+        used = [False] * len(text_boxes)
+
+        for i, box in enumerate(text_boxes):
+            if used[i]:
+                continue
+            group = [i]
+            label = box["label"]
+            used[i] = True
+
+            current_idx = i
+            while True:
+                next_idx = self._find_adjacent_body_text_index(
+                    text_boxes=text_boxes,
+                    used=used,
+                    current_idx=current_idx,
+                    page_height=height,
+                )
+                if next_idx is None:
+                    break
+                group.append(next_idx)
+                used[next_idx] = True
+                current_idx = next_idx
+
+            if label in self._TITLE_LABELS and len(group) == 1:
+                print(
+                    f"[TextCrop] page {page_idx}: 跳过未与段落正文合并的 {label}, "
+                    f"bbox={box['bbox']}"
+                )
+                continue
+            merged_groups.append(group)
+
+        # 切割并生成结果
+        text_items: List[Dict[str, Any]] = []
+        text_index = 0
+        for group in merged_groups:
+            # 合并组内所有 bbox
+            x1 = min(text_boxes[idx]["bbox"][0] for idx in group)
+            y1 = min(text_boxes[idx]["bbox"][1] for idx in group)
+            x2 = max(text_boxes[idx]["bbox"][2] for idx in group)
+            y2 = max(text_boxes[idx]["bbox"][3] for idx in group)
+
+            # 布局模型的文字框通常紧贴字符边缘，直接裁剪会让 PaddleOCR
+            # 漏掉左侧序号、行尾字符或最下面一行。按区域尺寸增加少量留白，
+            # 并裁切到页面边界内，避免引入过多周边图纸内容。
+            region_width = x2 - x1
+            region_height = y2 - y1
+            pad_x = max(12, int(round(region_width * 0.02)))
+            pad_y = max(12, int(round(region_height * 0.04)))
+            x1 = max(0, x1 - pad_x)
+            y1 = max(0, y1 - pad_y)
+            x2 = min(width, x2 + pad_x)
+            y2 = min(height, y2 + pad_y)
+
+            text_index += 1
+            crop_name = f"page_{page_idx:03d}_text_{text_index:03d}.png"
+            crop_path = out_dir / crop_name
+            image.crop((x1, y1, x2, y2)).save(crop_path)
+
+            labels_in_group = [text_boxes[idx]["label"] for idx in group]
+            display_label = f"文字区域{text_index}"
+            if any(l in self._TITLE_LABELS for l in labels_in_group):
+                display_label = (
+                    f"标题+正文{text_index}"
+                    if any(l in self._BODY_TEXT_LABELS for l in labels_in_group)
+                    else f"标题{text_index}"
+                )
+
+            text_items.append({
+                "image_path": str(crop_path),
+                "page": page_idx,
+                "text_index": text_index,
+                "display_label": display_label,
+                "bbox": [x1, y1, x2, y2],
+                "labels": labels_in_group,
+            })
+
+        print(
+            f"[TextCrop] page {page_idx}: 切割 {len(text_items)} 个段落文字区域, "
+            f"已跳过 {skipped_short_text_count} 个零散 text"
+        )
+        return text_items
 
     def _expand_table_top_to_boundary(self, gray: Any, x1: int, y1: int, x2: int, y2: int) -> int:
         if y1 <= 0 or x2 - x1 < 40 or y2 - y1 < 40:

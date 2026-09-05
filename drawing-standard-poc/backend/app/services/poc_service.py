@@ -12,6 +12,7 @@ from backend.app.services.table_layout_service import TableLayoutService4Batch
 from backend.app.services.mineru_img2md import image_to_markdown
 from backend.app.services.identify_standard import StandardCodeComparator, StandardCodeExtractor
 from backend.config.config import SQLManager
+from backend.app.services.text_ocr_service import text_ocr_service
 
 try:
     from PIL import Image
@@ -104,20 +105,31 @@ class PocService:
         return [name for name in names if name]
 
     def _pdf_name_from_resource_path(self, task_id: str, resource_path: str, task: Dict[str, Any] | None = None) -> str:
-        match = re.search(rf"{re.escape(task_id)}[\\/]+pdf_(\d+)[\\/]", str(resource_path or ""))
-        if not match:
-            return ""
-        file_index = int(match.group(1))
         if not task:
             task = self.get_task_status(task_id)
         records = self._get_task_file_records(task or {})
-        if 1 <= file_index <= len(records):
-            record = records[file_index - 1]
+
+        match = re.search(rf"{re.escape(task_id)}[\\/]+pdf_(\d+)[\\/]", str(resource_path or ""))
+        if match:
+            file_index = int(match.group(1))
+            if 1 <= file_index <= len(records):
+                record = records[file_index - 1]
+                return str(record.get("original_filename") or record.get("saved_filename") or "")
+
+        # 单文件任务为了兼容旧目录结构，不会额外创建 pdf_001 层。
+        # 此时资源只可能属于唯一的上传文件，直接用清单中的原始文件名回填。
+        if len(records) == 1:
+            record = records[0]
             return str(record.get("original_filename") or record.get("saved_filename") or "")
+
         return ""
 
     @staticmethod
     def _parse_table_index_from_path(path: str, fallback_index: int) -> int:
+        # 文字区域: text_001.md → 10000 + 1 = 10001
+        text_match = re.search(r"_text_(\d+)", str(path))
+        if text_match:
+            return 10000 + int(text_match.group(1))
         match = re.search(r"_table_(\d+)", str(path))
         if match:
             return int(match.group(1))
@@ -126,6 +138,10 @@ class PocService:
     @staticmethod
     def _table_display_name_from_path(path: str, fallback_index: int) -> str:
         text = str(path or "")
+        # 文字区域: text_001.md → "文字区域1"
+        text_match = re.search(r"_text_(\d+)", text)
+        if text_match:
+            return f"文字区域{int(text_match.group(1))}"
         match = re.search(r"_table_(\d+)(?:_part_(\d+)|_safe50_(upper|lower))?", text)
         if not match:
             return f"表格{fallback_index}"
@@ -244,32 +260,46 @@ class PocService:
         return content
 
     def _get_detected_standards_by_table(self, task_id: str) -> dict[int, list[str]]:
-        sql = """
+        # 表格来源的标准号
+        sql_table = """
             SELECT
                 ti.table_index,
                 se.original_text
             FROM standard_extracted se
             INNER JOIN table_markdown tm ON tm.id = se.table_markdown_id
             INNER JOIN table_image ti ON ti.id = tm.table_image_id
-            WHERE se.task_id = %s
+            WHERE se.task_id = %s AND (se.markdown_source IS NULL OR se.markdown_source = '')
             ORDER BY ti.table_index ASC, se.id ASC
+        """
+        # 文字区域来源的标准号 (text_index + 10000)
+        sql_text = """
+            SELECT
+                ti.text_index + 10000 AS table_index,
+                se.original_text
+            FROM standard_extracted se
+            INNER JOIN text_markdown tm ON tm.id = se.table_markdown_id
+            INNER JOIN text_image ti ON ti.id = tm.text_image_id
+            WHERE se.task_id = %s AND se.markdown_source = 'text'
+            ORDER BY ti.text_index ASC, se.id ASC
         """
         result: dict[int, list[str]] = {}
         try:
             with SQLManager() as db:
-                rows = db.get_list(sql, (task_id,)) or []
-            for row in rows:
-                table_index = int(row.get("table_index") or 0)
-                original_text = str(row.get("original_text") or "").strip()
-                if table_index <= 0 or not original_text:
-                    continue
-                result.setdefault(table_index, []).append(original_text)
+                for sql in (sql_table, sql_text):
+                    rows = db.get_list(sql, (task_id,)) or []
+                    for row in rows:
+                        table_index = int(row.get("table_index") or 0)
+                        original_text = str(row.get("original_text") or "").strip()
+                        if table_index <= 0 or not original_text:
+                            continue
+                        result.setdefault(table_index, []).append(original_text)
         except Exception as exc:
             print(f"[POC] 查询表格标准提取结果异常: {exc}")
         return result
 
     def _refresh_highlighted_markdown_storage(self, task_id: str) -> None:
-        sql = """
+        # 表格 markdown 查询
+        sql_table = """
             SELECT
                 tm.id,
                 tm.markdown_content,
@@ -280,8 +310,27 @@ class PocService:
             WHERE tm.task_id = %s
             ORDER BY ti.table_index ASC
         """
-        update_sql = """
+        # 文字区域 markdown 查询 (text_index + 10000)
+        sql_text = """
+            SELECT
+                tm.id,
+                tm.markdown_content,
+                tm.markdown_path,
+                ti.text_index + 10000 AS table_index
+            FROM text_markdown tm
+            INNER JOIN text_image ti ON ti.id = tm.text_image_id
+            WHERE tm.task_id = %s
+            ORDER BY ti.text_index ASC
+        """
+        update_table_sql = """
             UPDATE table_markdown
+            SET markdown_content = %s,
+                content_length = %s,
+                updated_at = NOW()
+            WHERE id = %s
+        """
+        update_text_sql = """
+            UPDATE text_markdown
             SET markdown_content = %s,
                 content_length = %s,
                 updated_at = NOW()
@@ -292,40 +341,53 @@ class PocService:
 
         try:
             with SQLManager() as db:
-                rows = db.get_list(sql, (task_id,)) or []
+                # 处理表格 markdown 高亮
+                rows = db.get_list(sql_table, (task_id,)) or []
                 for row in rows:
-                    markdown_path = str(row.get("markdown_path") or "")
-                    raw_markdown_content = ""
-
-                    if markdown_path:
-                        md_file = Path(markdown_path)
-                        if md_file.exists():
-                            try:
-                                raw_markdown_content = md_file.read_text(encoding="utf-8")
-                            except Exception:
-                                raw_markdown_content = ""
-
-                    if not raw_markdown_content:
-                        raw_markdown_content = self._strip_highlight_tags(
-                            str(row.get("markdown_content") or "")
+                    highlighted = self._build_highlighted_content(row, detected_standards_map)
+                    if highlighted is not None:
+                        db.modify(
+                            update_table_sql,
+                            (highlighted, len(highlighted), int(row.get("id"))),
                         )
 
-                    table_index = int(row.get("table_index") or 0)
-                    highlighted_markdown_content = self._highlight_markdown_by_backend_rules(
-                        raw_markdown_content,
-                        detected_standards_map.get(table_index, []),
-                    )
-
-                    db.modify(
-                        update_sql,
-                        (
-                            highlighted_markdown_content,
-                            len(highlighted_markdown_content),
-                            int(row.get("id")),
-                        ),
-                    )
+                # 处理文字区域 markdown 高亮
+                rows = db.get_list(sql_text, (task_id,)) or []
+                for row in rows:
+                    highlighted = self._build_highlighted_content(row, detected_standards_map)
+                    if highlighted is not None:
+                        db.modify(
+                            update_text_sql,
+                            (highlighted, len(highlighted), int(row.get("id"))),
+                        )
         except Exception as exc:
             print(f"[POC] 刷新高亮Markdown异常: {exc}")
+
+    def _build_highlighted_content(
+        self, row: dict, detected_standards_map: dict[int, list[str]]
+    ) -> str | None:
+        """为一行 markdown 记录构建高亮内容，返回 None 表示跳过。"""
+        markdown_path = str(row.get("markdown_path") or "")
+        raw_markdown_content = ""
+
+        if markdown_path:
+            md_file = Path(markdown_path)
+            if md_file.exists():
+                try:
+                    raw_markdown_content = md_file.read_text(encoding="utf-8")
+                except Exception:
+                    raw_markdown_content = ""
+
+        if not raw_markdown_content:
+            raw_markdown_content = self._strip_highlight_tags(
+                str(row.get("markdown_content") or "")
+            )
+
+        table_index = int(row.get("table_index") or 0)
+        return self._highlight_markdown_by_backend_rules(
+            raw_markdown_content,
+            detected_standards_map.get(table_index, []),
+        )
 
     def _load_task_tables_from_db(self, task_id: str) -> list[Dict[str, Any]]:
         sql = """
@@ -424,34 +486,118 @@ class PocService:
         }
 
     def _get_table_markdown_id_map(self, task_id: str) -> dict[int, int]:
-        sql = """
+        # 表格 markdown: table_index → table_markdown.id
+        sql_table = """
             SELECT tm.id, ti.table_index
             FROM table_markdown tm
             INNER JOIN table_image ti ON ti.id = tm.table_image_id
             WHERE tm.task_id = %s
         """
+        # 文字区域 markdown: text_index+10000 → text_markdown.id
+        sql_text = """
+            SELECT tm.id, ti.text_index + 10000 AS table_index
+            FROM text_markdown tm
+            INNER JOIN text_image ti ON ti.id = tm.text_image_id
+            WHERE tm.task_id = %s
+        """
+        result: dict[int, int] = {}
         with SQLManager() as db:
-            rows = db.get_list(sql, (task_id,)) or []
-        return {
-            int(row.get("table_index")): int(row.get("id"))
-            for row in rows
-            if row.get("table_index") is not None and row.get("id") is not None
-        }
+            for sql in (sql_table, sql_text):
+                rows = db.get_list(sql, (task_id,)) or []
+                for row in rows:
+                    ti = row.get("table_index")
+                    rid = row.get("id")
+                    if ti is not None and rid is not None:
+                        result[int(ti)] = int(rid)
+        return result
 
     def _get_markdown_files_from_db(self, task_id: str) -> list[str]:
-        sql = """
+        # 表格 markdown
+        sql_table = """
             SELECT markdown_path
             FROM table_markdown
             WHERE task_id = %s
             ORDER BY id ASC
         """
+        # 文字区域 markdown
+        sql_text = """
+            SELECT markdown_path
+            FROM text_markdown
+            WHERE task_id = %s
+            ORDER BY id ASC
+        """
+        paths: list[str] = []
         with SQLManager() as db:
-            rows = db.get_list(sql, (task_id,)) or []
-        return [
-            str(row.get("markdown_path"))
-            for row in rows
-            if row.get("markdown_path")
-        ]
+            for sql in (sql_table, sql_text):
+                rows = db.get_list(sql, (task_id,)) or []
+                for row in rows:
+                    p = row.get("markdown_path")
+                    if p:
+                        paths.append(str(p))
+        return paths
+
+    def _load_all_markdown_records_for_standard(self, task_id: str) -> list[dict]:
+        """从数据库直接读取 table_markdown + text_markdown 的内容，用于标准检测。
+        不依赖文件路径，直接读 DB 中的 markdown_content。
+        """
+        records: list[dict] = []
+
+        # 1. 表格 markdown
+        sql_table = """
+            SELECT
+                tm.id AS markdown_id,
+                tm.markdown_content,
+                ti.table_index,
+                ti.image_path
+            FROM table_markdown tm
+            INNER JOIN table_image ti ON ti.id = tm.table_image_id
+            WHERE tm.task_id = %s
+            ORDER BY ti.table_index ASC
+        """
+        # 2. 文字区域 markdown
+        sql_text = """
+            SELECT
+                tm.id AS markdown_id,
+                tm.markdown_content,
+                ti.text_index,
+                ti.image_path
+            FROM text_markdown tm
+            INNER JOIN text_image ti ON ti.id = tm.text_image_id
+            WHERE tm.task_id = %s
+            ORDER BY ti.text_index ASC
+        """
+        try:
+            with SQLManager() as db:
+                # 表格
+                rows = db.get_list(sql_table, (task_id,)) or []
+                for row in rows:
+                    table_index = int(row.get("table_index") or 0)
+                    image_path = row.get("image_path") or ""
+                    display_name = self._table_display_name_from_path(image_path, table_index)
+                    records.append({
+                        "markdown_id": int(row["markdown_id"]),
+                        "markdown_content": row.get("markdown_content") or "",
+                        "source": "",
+                        "table_index": table_index,
+                        "display_name": display_name,
+                    })
+
+                # 文字区域
+                rows = db.get_list(sql_text, (task_id,)) or []
+                for row in rows:
+                    text_index = int(row.get("text_index") or 0)
+                    display_name = f"文字区域{text_index}"
+                    records.append({
+                        "markdown_id": int(row["markdown_id"]),
+                        "markdown_content": row.get("markdown_content") or "",
+                        "source": "text",
+                        "table_index": 10000 + text_index,
+                        "display_name": display_name,
+                    })
+        except Exception as exc:
+            print(f"[POC] 加载 markdown 记录失败: {exc}")
+
+        return records
 
     def _clear_table_and_downstream_data(self, task_id: str) -> None:
         try:
@@ -460,6 +606,9 @@ class PocService:
                 db.modify("DELETE FROM standard_extracted WHERE task_id = %s", (task_id,))
                 db.modify("DELETE FROM table_markdown WHERE task_id = %s", (task_id,))
                 db.modify("DELETE FROM table_image WHERE task_id = %s", (task_id,))
+                # 清理文字区域数据
+                db.modify("DELETE FROM text_markdown WHERE task_id = %s", (task_id,))
+                db.modify("DELETE FROM text_image WHERE task_id = %s", (task_id,))
         except Exception as exc:
             print(f"[POC] 清理历史结果异常: {exc}")
 
@@ -1282,12 +1431,80 @@ class PocService:
                     }
                 )
             return tables
+
         except Exception as exc:
             print(f"[POC] 查询任务表格详情异常: {exc}")
             return []
 
-    def _load_task_standards(self, task_id: str) -> list[Dict[str, Any]]:
+    def _load_task_text_items(self, task_id: str) -> list[Dict[str, Any]]:
+        """从 text_image + text_markdown 表加载文字区域数据，返回格式与 _load_task_tables 一致，以便前端统一展示。"""
         sql = """
+            SELECT
+                ti.text_index,
+                ti.page_number,
+                ti.image_path,
+                tm.markdown_content,
+                tm.markdown_path
+            FROM text_image ti
+            LEFT JOIN text_markdown tm ON tm.text_image_id = ti.id
+            WHERE ti.task_id = %s
+            ORDER BY ti.text_index ASC
+        """
+        try:
+            with SQLManager() as db:
+                rows = db.get_list(sql, (task_id,)) or []
+
+            detected_standards_map = self._get_detected_standards_by_table(task_id)
+            task = self.get_task_status(task_id)
+
+            text_items: list[Dict[str, Any]] = []
+            for row in rows:
+                image_path = str(row.get("image_path") or "")
+                markdown_path = str(row.get("markdown_path") or "")
+                stored_markdown_content = row.get("markdown_content") or ""
+                raw_markdown_content = ""
+                if markdown_path:
+                    md_file = Path(markdown_path)
+                    if md_file.exists():
+                        try:
+                            raw_markdown_content = md_file.read_text(encoding="utf-8")
+                        except Exception:
+                            raw_markdown_content = ""
+                if not raw_markdown_content:
+                    raw_markdown_content = self._strip_highlight_tags(stored_markdown_content)
+
+                text_index = int(row.get("text_index") or 0)
+                # 文字区域用 text_index + 10000 作为 table_index，避免与表格冲突
+                display_index = text_index + 10000
+                highlighted_markdown_content = stored_markdown_content or self._highlight_markdown_by_backend_rules(
+                    raw_markdown_content,
+                    detected_standards_map.get(display_index, []),
+                )
+                text_items.append(
+                    {
+                        "pdf_name": self._pdf_name_from_resource_path(task_id, image_path, task),
+                        "page": int(row.get("page_number") or 0),
+                        "table_index": display_index,
+                        "display_name": f"文字区域{text_index}",
+                        "label": "text",
+                        "score": 0.0,
+                        "bbox": [],
+                        "image_path": image_path,
+                        "image_url": self._local_path_to_url(image_path) if image_path else "",
+                        "raw_markdown_content": raw_markdown_content,
+                        "markdown_content": highlighted_markdown_content,
+                        "highlighted_markdown_content": highlighted_markdown_content,
+                        "markdown_path": markdown_path,
+                    }
+                )
+            return text_items
+        except Exception as exc:
+            print(f"[POC] 查询文字区域详情异常: {exc}")
+            return []
+
+    def _load_task_standards(self, task_id: str) -> list[Dict[str, Any]]:
+        # 表格来源的标准检测结果
+        sql_table = """
             SELECT
                 se.id,
                 se.original_text,
@@ -1301,23 +1518,46 @@ class PocService:
             LEFT JOIN standard_comparison sc ON sc.standard_extracted_id = se.id
             LEFT JOIN table_markdown tm ON tm.id = se.table_markdown_id
             LEFT JOIN table_image ti ON ti.id = tm.table_image_id
-            WHERE se.task_id = %s
-            ORDER BY COALESCE(ti.table_index, 0), se.id
+            WHERE se.task_id = %s AND (se.markdown_source IS NULL OR se.markdown_source = '')
+        """
+        # 文字区域来源的标准检测结果 (text_index + 10000)
+        sql_text = """
+            SELECT
+                se.id,
+                se.original_text,
+                sc.match_status,
+                sc.match_score,
+                sc.message,
+                sc.matched_standard_no,
+                ti.text_index + 10000 AS table_index,
+                ti.image_path
+            FROM standard_extracted se
+            LEFT JOIN standard_comparison sc ON sc.standard_extracted_id = se.id
+            LEFT JOIN text_markdown tm ON tm.id = se.table_markdown_id
+            LEFT JOIN text_image ti ON ti.id = tm.text_image_id
+            WHERE se.task_id = %s AND se.markdown_source = 'text'
         """
         try:
+            all_rows: list[dict] = []
             with SQLManager() as db:
-                rows = db.get_list(sql, (task_id,)) or []
+                for sql in (sql_table, sql_text):
+                    rows = db.get_list(sql, (task_id,)) or []
+                    all_rows.extend(rows)
+
+            # 按 table_index + id 排序
+            all_rows.sort(key=lambda r: (int(r.get("table_index") or 0), int(r.get("id") or 0)))
 
             standards: list[Dict[str, Any]] = []
             task = self.get_task_status(task_id)
-            for row in rows:
+            for row in all_rows:
                 score = int(row.get("match_score") or 0)
                 confidence = max(0.0, min(1.0, score / 100.0))
                 table_index = int(row.get("table_index") or 0)
-                source_table = self._table_display_name_from_path(row.get("image_path") or "", table_index) if table_index > 0 else ""
+                image_path = row.get("image_path") or ""
+                source_table = self._table_display_name_from_path(image_path, table_index) if table_index > 0 else ""
                 standards.append(
                     {
-                        "pdf_name": self._pdf_name_from_resource_path(task_id, row.get("image_path") or "", task),
+                        "pdf_name": self._pdf_name_from_resource_path(task_id, image_path, task),
                         "standard_no": row.get("original_text") or "",
                         "matched_standard": row.get("matched_standard_no") or "未匹配",
                         "status": row.get("match_status") or "待识别",
@@ -1339,6 +1579,10 @@ class PocService:
             return {}
 
         tables = self._load_task_tables(task_id)
+        # 将文字区域数据混入 tables，前端无需改动即可展示
+        text_items = self._load_task_text_items(task_id)
+        if text_items:
+            tables.extend(text_items)
         standards = self._load_task_standards(task_id)
         overall_standard_compare = self._build_overall_standard_compare(task_id)
         file_records = self._get_task_file_records(task)
@@ -1411,6 +1655,7 @@ class PocService:
         
         try:
             tables = []
+            text_items_all = []   # 文字区域切割结果
             total_tables = 0
             total_pages = 0
             file_count = len(file_records)
@@ -1452,7 +1697,6 @@ class PocService:
                             continue
                         table_index = len(tables) + 1
                         url_path = self._local_path_to_url(table_path)
-                        print(f"[POC] 表格图片路径转换: {table_path} -> {url_path}")
                         tables.append({
                             "pdf_name": pdf_name,
                             "page": page_idx,
@@ -1468,6 +1712,26 @@ class PocService:
                             "score": 0.0,
                         })
 
+                    # 收集文字区域切割结果
+                    text_crop_items = page.get('text_crop_items') or []
+                    print(f"[POC] page {page_idx}: 检测到 {len(text_crop_items)} 个文字区域")
+                    for text_crop in text_crop_items:
+                        text_path = str(text_crop.get("image_path") or "")
+                        if not text_path:
+                            continue
+                        url_path = self._local_path_to_url(text_path)
+                        text_items_all.append({
+                            "pdf_name": pdf_name,
+                            "page": page_idx,
+                            "text_index": text_crop.get("text_index", 0),
+                            "display_label": text_crop.get("display_label", ""),
+                            "image_path": text_path,
+                            "image_url": url_path,
+                            "bbox": text_crop.get("bbox", []),
+                            "labels": text_crop.get("labels", []),
+                            "label": "text",
+                        })
+
             self._update_task_status(
                 task_id=task_id,
                 status=1,
@@ -1478,7 +1742,20 @@ class PocService:
             # 重跑识别时，先清理旧结果再写入本次表格图片
             self._clear_table_and_downstream_data(task_id)
             self._save_table_images(task_id, tables)
-            
+
+            # 文字区域 OCR 识别（PaddleOCR）
+            text_ocr_result = None
+            if text_items_all:
+                print(f"[POC] 开始文字区域 OCR 识别，共 {len(text_items_all)} 个文字区域")
+                print(f"[POC] 文字区域详情: {[item['image_path'] for item in text_items_all]}")
+                text_ocr_result = text_ocr_service.process_text_images(
+                    task_id=task_id,
+                    text_items=text_items_all,
+                )
+                print(f"[POC] 文字区域 OCR 完成: {text_ocr_result.get('success_count', 0)}/{len(text_items_all)} 成功")
+            else:
+                print(f"[POC] 警告: text_items_all 为空，跳过 OCR 识别")
+
             # 5. 更新数据库统计信息
             self._update_task_status(
                 task_id=task_id,
@@ -1489,15 +1766,18 @@ class PocService:
                 table_count=total_tables,
             )
             
-            print(f"[POC] PDF解析成功: {total_tables} 个表格")
+            print(f"[POC] PDF解析成功: {total_tables} 个表格, {len(text_items_all)} 个文字区域")
             
             return {
                 "task_id": task_id,
                 "total_pages": total_pages,
                 "total_tables": total_tables,
+                "total_texts": len(text_items_all),
                 "file_count": len(file_records),
                 "processed_files": len(file_records),
                 "tables": tables,
+                "text_items": text_items_all,
+                "text_ocr_result": text_ocr_result,
                 "annotated_images": self._load_annotated_images(task_id),
             }
             
@@ -1568,6 +1848,7 @@ class PocService:
             )
 
             tables: list[Dict[str, Any]] = []
+            text_items_all: list[Dict[str, Any]] = []  # 文字区域切割结果
             for page in result.get('pages', []):
                 page_idx = page.get('page', 0)
                 table_crop_items = page.get('table_crop_items') or [
@@ -1594,10 +1875,38 @@ class PocService:
                         "score": 0.0,
                     })
 
+                # 收集文字区域切割结果
+                text_crop_items = page.get('text_crop_items') or []
+                for text_crop in text_crop_items:
+                    text_path = str(text_crop.get("image_path") or "")
+                    if not text_path:
+                        continue
+                    text_items_all.append({
+                        "pdf_name": pdf_name,
+                        "page": page_idx,
+                        "text_index": text_crop.get("text_index", 0),
+                        "display_label": text_crop.get("display_label", ""),
+                        "image_path": text_path,
+                        "image_url": self._local_path_to_url(text_path),
+                        "bbox": text_crop.get("bbox", []),
+                        "labels": text_crop.get("labels", []),
+                        "label": "text",
+                    })
+
             if not tables:
                 raise ValueError(f"未识别到表格: {pdf_name}")
 
             self._save_table_images(task_id, tables)
+
+            # 文字区域 OCR 识别（PaddleOCR）
+            text_ocr_result = None
+            if text_items_all:
+                print(f"[POC] 开始文字区域 OCR 识别，共 {len(text_items_all)} 个文字区域")
+                text_ocr_result = text_ocr_service.process_text_images(
+                    task_id=task_id,
+                    text_items=text_items_all,
+                )
+                print(f"[POC] 文字区域 OCR 完成: {text_ocr_result.get('success_count', 0)}/{len(text_items_all)} 成功")
 
             markdown_result = self.convert_tables_to_markdown(
                 task_id=task_id,
@@ -1610,6 +1919,9 @@ class PocService:
                 for item in markdown_result.get("results", [])
                 if item.get("success") and item.get("md_file")
             ]
+            # 追加文字区域的 markdown 文件，一起送入标准检测
+            if text_ocr_result and text_ocr_result.get("markdown_paths"):
+                markdown_files.extend(text_ocr_result["markdown_paths"])
             if not markdown_files:
                 raise ValueError(f"未生成Markdown文件: {pdf_name}")
 
@@ -1647,7 +1959,10 @@ class PocService:
                 "processed_files": completed_count,
                 "total_pages": int(result.get('total_pages') or 0),
                 "total_tables": len(tables),
+                "total_texts": len(text_items_all),
                 "tables": tables,
+                "text_items": text_items_all,
+                "text_ocr_result": text_ocr_result,
                 "markdown_results": markdown_result.get("results", []),
                 "markdown_files": markdown_files,
                 "detection_result": detection_result,
@@ -1979,12 +2294,10 @@ class PocService:
         Returns:
             包含标准检测结果的字典
         """
-        if not markdown_files:
-            markdown_files = self._get_markdown_files_from_db(task_id)
-        if not markdown_files:
-            raise ValueError("Markdown文件列表为空")
+        # 始终从数据库查询，确保 table_markdown + text_markdown 都包含
+        markdown_files = self._get_markdown_files_from_db(task_id)
         
-        print(f"[POC] 开始标准检测: task_id={task_id}, {len(markdown_files)} 个文件")
+        print(f"[POC] 开始标准检测: task_id={task_id}")
         task_info = self.get_task_status(task_id)
         file_count = len(self._get_task_file_records(task_info)) or 1
         
@@ -2003,7 +2316,13 @@ class PocService:
             comparator = StandardCodeComparator()
             if clear_existing:
                 self._clear_standard_data(task_id)
-            markdown_id_map = self._get_table_markdown_id_map(task_id)
+            
+            # ============================================================
+            # 直接从数据库读取 table_markdown + text_markdown 的内容
+            # 不依赖文件路径，不解析文件名，最可靠
+            # ============================================================
+            md_records = self._load_all_markdown_records_for_standard(task_id)
+            print(f"[POC] 从DB加载 {len(md_records)} 条 markdown 记录 (table+text)")
             
             all_results = []
             markdown_texts: list[str] = []
@@ -2014,39 +2333,36 @@ class PocService:
             similar_count = 0
             not_found_count = 0
             
-            # 遍历每个Markdown文件
-            for idx, md_file_path in enumerate(markdown_files):
+            # 遍历每条 markdown 记录
+            for idx, rec in enumerate(md_records):
                 if update_task_status:
                     self._update_task_status(
                         task_id=task_id,
                         status=1,
-                        progress=90.00 + idx / max(len(markdown_files), 1) * 8.00,
-                        current_step=f"检验中，当前已检测 {idx}/{len(markdown_files)} 个Markdown文件",
+                        progress=90.00 + idx / max(len(md_records), 1) * 8.00,
+                        current_step=f"检验中，当前已检测 {idx}/{len(md_records)} 个Markdown",
                     )
-                md_path = Path(md_file_path)
-                if not md_path.exists():
-                    print(f"[POC] Markdown文件不存在: {md_file_path}")
+
+                table_markdown_id = rec["markdown_id"]
+                md_content = rec["markdown_content"] or ""
+                markdown_source = rec["source"]  # "" 或 "text"
+                display_name = rec["display_name"]
+
+                if not md_content.strip():
+                    print(f"[POC] markdown内容为空，跳过: id={table_markdown_id}, source={markdown_source or 'table'}")
                     continue
 
-                table_index = self._parse_table_index_from_path(md_file_path, idx + 1)
-                table_display_name = self._table_display_name_from_path(md_file_path, table_index)
-                table_markdown_id = markdown_id_map.get(table_index)
-                if not table_markdown_id:
-                    print(f"[POC] 跳过标准入库，未找到table_markdown记录: task_id={task_id}, table_index={table_index}")
-                    continue
-                
-                # 读取Markdown内容
-                md_content = md_path.read_text(encoding='utf-8')
                 markdown_texts.append(md_content)
-                
+                print(f"[POC] 标准检测 #{idx+1}: id={table_markdown_id}, source={markdown_source or 'table'}, name={display_name}, content_len={len(md_content)}")
+
                 # 提取并去重标准号，再与标准库比对
                 match_results = comparator.batch_compare(md_content)
 
                 if not match_results:
-                    print(f"[POC] 文件 {md_file_path} 未提取到标准号")
+                    print(f"[POC] #{idx+1} 未提取到标准号")
                     continue
 
-                print(f"[POC] 文件 {md_file_path} 去重后提取到 {len(match_results)} 个标准号")
+                print(f"[POC] #{idx+1} 提取到 {len(match_results)} 个标准号")
 
                 table_results = []
                 for result_idx, match_result in enumerate(match_results, start=1):
@@ -2054,11 +2370,11 @@ class PocService:
                     raw_score = int(result_dict.get("score") or 0)
                     
                     # 添加文件信息
-                    result_dict['markdown_file'] = str(md_file_path)
-                    result_dict['table_index'] = table_index
-                    result_dict['table_display_name'] = table_display_name
-                    result_dict['source_table'] = table_display_name
-                    result_dict['table_group_key'] = table_display_name.replace('表格', '').replace(' ', '')
+                    result_dict['markdown_file'] = display_name
+                    result_dict['table_index'] = rec.get("table_index", 0)
+                    result_dict['table_display_name'] = display_name
+                    result_dict['source_table'] = display_name
+                    result_dict['table_group_key'] = display_name.replace('表格', '').replace(' ', '')
                     
                     # 统计
                     total_standards += 1
@@ -2098,8 +2414,9 @@ class PocService:
                             has_t,
                             row_index,
                             col_index,
-                            cell_text
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            cell_text,
+                            markdown_source
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
                     # 保证同一 task 下不同 markdown 文件的标准号不会因 row_index 重复而冲突。
                     # 之前 row_index 仅使用 result_idx，会导致表1/表2第1条同标准号触发唯一键冲突。
@@ -2116,6 +2433,7 @@ class PocService:
                         row_index,
                         0,
                         extracted.get("original") or "",
+                        markdown_source or None,
                     )
 
                     with SQLManager() as db:
